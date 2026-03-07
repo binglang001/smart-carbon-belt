@@ -136,6 +136,7 @@ def collect_data(duration_seconds=None):
                             'linear_x': d['linear_x'],
                             'linear_y': d['linear_y'],
                             'linear_z': d['linear_z'],
+                            'linear_magnitude': d['linear_mag'],
                         })
                         sample_count += 1
                         last_saved_idx = d['sample_idx']

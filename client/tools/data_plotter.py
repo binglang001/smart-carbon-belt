@@ -234,6 +234,24 @@ def plot_with_text(data, t_max=1.0, t_min=-0.5):
     logger.info(f"过零点数: {len(zero_crossings)}")
 
 
+def find_latest_data_file():
+    """查找最新的数据文件"""
+    search_dirs = ['data/gravity', 'data']
+    csv_files = []
+
+    for data_dir in search_dirs:
+        if os.path.exists(data_dir):
+            for f in os.listdir(data_dir):
+                if f.endswith('.csv'):
+                    csv_files.append(os.path.join(data_dir, f))
+
+    if not csv_files:
+        return None
+
+    csv_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+    return csv_files[0]
+
+
 def main():
     import sys
     import os
@@ -241,32 +259,40 @@ def main():
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     try:
         import config
-        DEFAULT_T_MAX = config.STEP_CONFIG.get("t_max", 0.2)
-        DEFAULT_T_MIN = config.STEP_CONFIG.get("t_min", -0.05)
+        DEFAULT_T_MAX = config.STEP_CONFIG.get("t_max", 0.12)
+        DEFAULT_T_MIN = config.STEP_CONFIG.get("t_min", -0.06)
     except:
-        DEFAULT_T_MAX = 0.2
-        DEFAULT_T_MIN = -0.05
+        DEFAULT_T_MAX = 0.12
+        DEFAULT_T_MIN = -0.06
 
-    parser = argparse.ArgumentParser(description='数据绘图 - 论文算法')
-    parser.add_argument('input', help='输入CSV文件')
-    parser.add_argument('-o', '--output', help='输出图片文件（默认自动生成）')
-    parser.add_argument('--t-max', type=float, default=DEFAULT_T_MAX, help='波峰阈值 (默认0.2)')
-    parser.add_argument('--t-min', type=float, default=DEFAULT_T_MIN, help='波谷阈值 (默认-0.05)')
+    parser = argparse.ArgumentParser(description='步数检测分析 - 绘图工具')
+    parser.add_argument('input', nargs='?', help='输入CSV文件（默认自动查找最新）')
+    parser.add_argument('-o', '--output', help='输出图片目录（默认自动生成）')
+    parser.add_argument('--t-max', type=float, default=DEFAULT_T_MAX, help=f'波峰阈值 (默认{DEFAULT_T_MAX})')
+    parser.add_argument('--t-min', type=float, default=DEFAULT_T_MIN, help=f'波谷阈值 (默认{DEFAULT_T_MIN})')
     parser.add_argument('--text', action='store_true', help='纯文本模式')
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.input):
-        logger.error(f"文件不存在: {args.input}")
+    # 自动查找最新文件
+    input_file = args.input
+    if not input_file:
+        input_file = find_latest_data_file()
+        if not input_file:
+            logger.error("未找到数据文件，请先运行 data_collector.py 采集数据")
+            sys.exit(1)
+
+    if not os.path.exists(input_file):
+        logger.error(f"文件不存在: {input_file}")
         return
 
-    # 自动生成输出文件名
+    # 自动生成输出目录
     if not args.output:
-        base_name = os.path.splitext(os.path.basename(args.input))[0]
-        args.output = f"{base_name}.png"
-        logger.info(f"自动保存图片: {args.output}")
+        base_name = os.path.splitext(os.path.basename(input_file))[0]
+        args.output = os.path.join(os.path.dirname(input_file), "plots", base_name)
+        logger.info(f"自动保存图表目录: {args.output}")
 
-    data = load_data(args.input)
+    data = load_data(input_file)
 
     if args.text:
         plot_with_text(data, args.t_max, args.t_min)

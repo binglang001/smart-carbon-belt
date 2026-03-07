@@ -366,17 +366,22 @@ class GravityAnalyzer:
         self.analyze_statistics(self.raw_data)
 
 
-def find_latest_gravity_file(data_dir='data/gravity'):
-    """查找最新的重力数据文件"""
-    if not os.path.exists(data_dir):
-        return None
+def find_latest_data_file():
+    """查找最新的数据文件（同时查找data和data/gravity目录）"""
+    search_dirs = ['data/gravity', 'data']
+    csv_files = []
 
-    csv_files = [f for f in os.listdir(data_dir) if f.endswith('.csv')]
+    for data_dir in search_dirs:
+        if os.path.exists(data_dir):
+            for f in os.listdir(data_dir):
+                if f.endswith('.csv'):
+                    csv_files.append(os.path.join(data_dir, f))
+
     if not csv_files:
         return None
 
-    csv_files.sort(key=lambda f: os.path.getmtime(os.path.join(data_dir, f)), reverse=True)
-    return os.path.join(data_dir, csv_files[0])
+    csv_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+    return csv_files[0]
 
 
 def main():
@@ -408,9 +413,9 @@ def main():
     # 自动查找最新文件
     input_file = args.input
     if not input_file:
-        input_file = find_latest_gravity_file()
+        input_file = find_latest_data_file()
         if not input_file:
-            logger.error("未找到数据文件，请先运行 gravity_collector.py 采集数据")
+            logger.error("未找到数据文件，请先运行 data_collector.py 采集数据")
             sys.exit(1)
 
     logger.info(f"分析文件: {input_file}")
