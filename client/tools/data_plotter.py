@@ -118,7 +118,7 @@ def find_zero_crossings(data):
     return crossings
 
 
-def plot_with_matplotlib(data, output_file=None, t_max=1.0, t_min=-0.5):
+def plot_with_matplotlib(data, output_dir=None, t_max=1.0, t_min=-0.5):
     """使用matplotlib绘图"""
     try:
         plt = setup_chinese_font()
@@ -137,11 +137,15 @@ def plot_with_matplotlib(data, output_file=None, t_max=1.0, t_min=-0.5):
     valleys = find_valleys(data, t_min)
     zero_crossings = find_zero_crossings(data)
 
-    # 创建图形
-    fig, axes = plt.subplots(2, 1, figsize=(16, 10))
+    # 创建输出目录
+    if output_dir is None:
+        output_dir = os.path.join(os.path.dirname(output_dir) if output_dir else '.', "plots")
+    os.makedirs(output_dir, exist_ok=True)
 
-    # 上图: 原始加速度
-    ax1 = axes[0]
+    dpi = 300
+
+    # 图1: 原始加速度
+    fig1, ax1 = plt.subplots(figsize=(14, 5))
     ax1.plot(timestamps, acc_mag, 'b-', linewidth=0.8, label='原始合加速度')
     ax1.axhline(y=1.0, color='gray', linestyle='--', linewidth=0.5, alpha=0.5, label='1g')
     ax1.set_xlabel('时间 (秒)')
@@ -149,9 +153,14 @@ def plot_with_matplotlib(data, output_file=None, t_max=1.0, t_min=-0.5):
     ax1.set_title('原始加速度合量')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
+    plt.tight_layout()
+    output_file1 = os.path.join(output_dir, '01_raw_acceleration.png')
+    plt.savefig(output_file1, dpi=dpi)
+    logger.info(f"图表已保存: {output_file1}")
+    plt.close()
 
-    # 下图: 预处理后线性加速度
-    ax2 = axes[1]
+    # 图2: 预处理后线性加速度（带特征点标记）
+    fig2, ax2 = plt.subplots(figsize=(14, 5))
     ax2.plot(timestamps, linear_mag, 'b-', linewidth=0.8, label='线性加速度')
 
     # 阈值线
@@ -179,14 +188,16 @@ def plot_with_matplotlib(data, output_file=None, t_max=1.0, t_min=-0.5):
 
     ax2.set_xlabel('时间 (秒)')
     ax2.set_ylabel('加速度 (g)')
-    ax2.set_title('预处理后线性加速度 - 论文1+论文2')
+    ax2.set_title('预处理后线性加速度 - 带特征点标记')
     ax2.legend()
     ax2.grid(True, alpha=0.3)
-
     plt.tight_layout()
+    output_file2 = os.path.join(output_dir, '02_linear_with_peaks.png')
+    plt.savefig(output_file2, dpi=dpi)
+    logger.info(f"图表已保存: {output_file2}")
+    plt.close()
 
-    plt.savefig(output_file, dpi=150)
-    logger.info(f"图表已保存: {output_file}")
+    logger.info(f"所有图表已保存到目录: {output_dir}")
 
 
 def plot_with_text(data, t_max=1.0, t_min=-0.5):

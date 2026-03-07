@@ -179,7 +179,7 @@ class GravityAnalyzer:
         logger.info(f"线性加速度幅值 - 均值: {avg_mag:.4f}g, 范围: [{min_mag:.4f}, {max_mag:.4f}]")
         logger.info(f"线性加速度Y轴 - 均值: {avg_y:.4f}g, 范围: [{min_y:.4f}, {max_y:.4f}]")
 
-    def plot_comparison(self, alpha, window_size, output_file=None, t_max=None, t_min=None):
+    def plot_comparison(self, alpha, window_size, output_dir=None, t_max=None, t_min=None):
         """绘制对比图"""
         try:
             plt = setup_chinese_font()
@@ -206,11 +206,17 @@ class GravityAnalyzer:
         linear_mag = [d['linear_magnitude'] for d in self.processed_data]
         linear_y = [d['linear_y'] for d in self.processed_data]
 
-        # 创建图形 - 3行1列
-        fig, axes = plt.subplots(3, 1, figsize=(14, 12))
+        # 创建输出目录
+        if output_dir is None:
+            base_name = os.path.splitext(os.path.basename(self.csv_file))[0]
+            output_dir = os.path.join(os.path.dirname(self.csv_file), "plots", base_name)
+        os.makedirs(output_dir, exist_ok=True)
 
-        # 上图: 原始加速度幅值
-        ax1 = axes[0]
+        # DPI设置
+        dpi = 300
+
+        # 图1: 原始加速度幅值
+        fig1, ax1 = plt.subplots(figsize=(14, 5))
         ax1.plot(timestamps, raw_mag, 'b-', linewidth=0.8, label='原始加速度幅值')
         ax1.axhline(y=1.0, color='gray', linestyle='--', linewidth=0.5, alpha=0.5, label='1g')
         ax1.set_xlabel('时间 (秒)')
@@ -218,9 +224,14 @@ class GravityAnalyzer:
         ax1.set_title('原始加速度幅值')
         ax1.legend()
         ax1.grid(True, alpha=0.3)
+        plt.tight_layout()
+        output_file1 = os.path.join(output_dir, '01_raw_acceleration.png')
+        plt.savefig(output_file1, dpi=dpi)
+        logger.info(f"图表已保存: {output_file1}")
+        plt.close()
 
-        # 中图: 线性加速度Y轴分量（步数检测用这个）
-        ax2 = axes[1]
+        # 图2: 线性加速度Y轴分量（步数检测用这个）
+        fig2, ax2 = plt.subplots(figsize=(14, 5))
         ax2.plot(timestamps, linear_y, 'g-', linewidth=0.8, label=f'线性加速度Y轴 (α={alpha}, window={window_size})')
         ax2.axhline(y=0, color='gray', linestyle='-', linewidth=0.5, alpha=0.5, label='零线')
         ax2.axhline(y=t_max, color='r', linestyle='--', linewidth=0.5, alpha=0.3, label=f'T_max={t_max}')
@@ -230,31 +241,33 @@ class GravityAnalyzer:
         ax2.set_title('线性加速度Y轴分量（步数检测用此通道）')
         ax2.legend()
         ax2.grid(True, alpha=0.3)
+        plt.tight_layout()
+        output_file2 = os.path.join(output_dir, '02_linear_y_axis.png')
+        plt.savefig(output_file2, dpi=dpi)
+        logger.info(f"图表已保存: {output_file2}")
+        plt.close()
 
-        # 下图: 线性加速度幅值
-        ax3 = axes[2]
+        # 图3: 线性加速度幅值
+        fig3, ax3 = plt.subplots(figsize=(14, 5))
         ax3.plot(timestamps, linear_mag, 'r-', linewidth=0.8, label=f'线性加速度幅值')
         ax3.axhline(y=0, color='gray', linestyle='-', linewidth=0.5, alpha=0.5, label='零线')
         ax3.set_xlabel('时间 (秒)')
         ax3.set_ylabel('加速度 (g)')
         ax3.set_title('重力去除后的线性加速度幅值')
         ax3.legend()
-        ax2.grid(True, alpha=0.3)
-
+        ax3.grid(True, alpha=0.3)
         plt.tight_layout()
-
-        if output_file is None:
-            base_name = os.path.splitext(os.path.basename(self.csv_file))[0]
-            output_file = f"{base_name}_analyzed.png"
-
-        plt.savefig(output_file, dpi=150)
-        logger.info(f"图表已保存: {output_file}")
+        output_file3 = os.path.join(output_dir, '03_linear_magnitude.png')
+        plt.savefig(output_file3, dpi=dpi)
+        logger.info(f"图表已保存: {output_file3}")
         plt.close()
+
+        logger.info(f"所有图表已保存到目录: {output_dir}")
 
         # 输出统计
         self.analyze_statistics(self.processed_data)
 
-    def plot_original(self, output_file=None):
+    def plot_original(self, output_dir=None):
         """绘制原始数据图"""
         try:
             plt = setup_chinese_font()
@@ -272,13 +285,21 @@ class GravityAnalyzer:
         raw_y = [d['acc_y'] for d in self.raw_data]
         raw_z = [d['acc_z'] for d in self.raw_data]
         raw_mag = [d['acc_magnitude'] for d in self.raw_data]
+        linear_x = [d['linear_x'] for d in self.raw_data]
+        linear_y = [d['linear_y'] for d in self.raw_data]
+        linear_z = [d['linear_z'] for d in self.raw_data]
         linear_mag = [d['linear_magnitude'] for d in self.raw_data]
 
-        # 创建图形
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        # 创建输出目录
+        if output_dir is None:
+            base_name = os.path.splitext(os.path.basename(self.csv_file))[0]
+            output_dir = os.path.join(os.path.dirname(self.csv_file), "plots", base_name + "_original")
+        os.makedirs(output_dir, exist_ok=True)
+
+        dpi = 300
 
         # 图1: 三轴原始加速度
-        ax1 = axes[0, 0]
+        fig1, ax1 = plt.subplots(figsize=(14, 5))
         ax1.plot(timestamps, raw_x, 'r-', linewidth=0.5, label='X轴')
         ax1.plot(timestamps, raw_y, 'g-', linewidth=0.5, label='Y轴')
         ax1.plot(timestamps, raw_z, 'b-', linewidth=0.5, label='Z轴')
@@ -287,9 +308,14 @@ class GravityAnalyzer:
         ax1.set_title('原始三轴加速度')
         ax1.legend()
         ax1.grid(True, alpha=0.3)
+        plt.tight_layout()
+        output_file1 = os.path.join(output_dir, '01_raw_3axis.png')
+        plt.savefig(output_file1, dpi=dpi)
+        logger.info(f"图表已保存: {output_file1}")
+        plt.close()
 
         # 图2: 原始加速度幅值
-        ax2 = axes[0, 1]
+        fig2, ax2 = plt.subplots(figsize=(14, 5))
         ax2.plot(timestamps, raw_mag, 'b-', linewidth=0.8)
         ax2.axhline(y=1.0, color='gray', linestyle='--', linewidth=0.5, alpha=0.5, label='1g')
         ax2.set_xlabel('时间 (秒)')
@@ -297,12 +323,14 @@ class GravityAnalyzer:
         ax2.set_title('原始加速度幅值')
         ax2.legend()
         ax2.grid(True, alpha=0.3)
+        plt.tight_layout()
+        output_file2 = os.path.join(output_dir, '02_raw_magnitude.png')
+        plt.savefig(output_file2, dpi=dpi)
+        logger.info(f"图表已保存: {output_file2}")
+        plt.close()
 
         # 图3: 三轴线性加速度
-        ax3 = axes[1, 0]
-        linear_x = [d['linear_x'] for d in self.raw_data]
-        linear_y = [d['linear_y'] for d in self.raw_data]
-        linear_z = [d['linear_z'] for d in self.raw_data]
+        fig3, ax3 = plt.subplots(figsize=(14, 5))
         ax3.plot(timestamps, linear_x, 'r-', linewidth=0.5, label='X轴')
         ax3.plot(timestamps, linear_y, 'g-', linewidth=0.5, label='Y轴')
         ax3.plot(timestamps, linear_z, 'b-', linewidth=0.5, label='Z轴')
@@ -312,9 +340,14 @@ class GravityAnalyzer:
         ax3.set_title('重力去除后三轴线性加速度')
         ax3.legend()
         ax3.grid(True, alpha=0.3)
+        plt.tight_layout()
+        output_file3 = os.path.join(output_dir, '03_linear_3axis.png')
+        plt.savefig(output_file3, dpi=dpi)
+        logger.info(f"图表已保存: {output_file3}")
+        plt.close()
 
         # 图4: 线性加速度幅值
-        ax4 = axes[1, 1]
+        fig4, ax4 = plt.subplots(figsize=(14, 5))
         ax4.plot(timestamps, linear_mag, 'r-', linewidth=0.8)
         ax4.axhline(y=0, color='gray', linestyle='-', linewidth=0.5, alpha=0.5, label='零线')
         ax4.set_xlabel('时间 (秒)')
@@ -322,16 +355,13 @@ class GravityAnalyzer:
         ax4.set_title('重力去除后线性加速度幅值')
         ax4.legend()
         ax4.grid(True, alpha=0.3)
-
         plt.tight_layout()
-
-        if output_file is None:
-            base_name = os.path.splitext(os.path.basename(self.csv_file))[0]
-            output_file = f"{base_name}_original.png"
-
-        plt.savefig(output_file, dpi=150)
-        logger.info(f"图表已保存: {output_file}")
+        output_file4 = os.path.join(output_dir, '04_linear_magnitude.png')
+        plt.savefig(output_file4, dpi=dpi)
+        logger.info(f"图表已保存: {output_file4}")
         plt.close()
+
+        logger.info(f"所有图表已保存到目录: {output_dir}")
 
         self.analyze_statistics(self.raw_data)
 
@@ -394,7 +424,7 @@ def main():
     if args.original:
         analyzer.plot_original(args.output)
     else:
-        analyzer.plot_comparison(args.alpha, args.window, args.output)
+        analyzer.plot_comparison(args.alpha, args.window, args.output, t_max=args.t_max, t_min=args.t_min)
 
 
 if __name__ == '__main__':

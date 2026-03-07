@@ -84,13 +84,15 @@ def collect_data(duration_seconds=None):
     # 设置信号处理
     signal.signal(signal.SIGINT, signal_handler)
 
-    # CSV字段 - 50Hz步数检测数据
+    # CSV字段 - 完整数据（兼容重力去除和步数检测分析）
     fieldnames = [
         'timestamp',
         'sample_idx',
         # 原始加速度
         'acc_x', 'acc_y', 'acc_z', 'acc_magnitude',
-        # 预处理后的线性加速度
+        # 重力加速度（用于重力去除分析）
+        'gravity_x', 'gravity_y', 'gravity_z',
+        # 线性加速度（用于步数检测）
         'linear_x', 'linear_y', 'linear_z',
     ]
 
@@ -114,6 +116,13 @@ def collect_data(duration_seconds=None):
                 # 保存所有新的检测数据
                 for d in detect_data:
                     if d['sample_idx'] > last_saved_idx:
+                        # 获取重力加速度
+                        gravity_remover = sampler._gravity_remover
+                        if gravity_remover:
+                            gx, gy, gz = gravity_remover.get_gravity()
+                        else:
+                            gx, gy, gz = 0, 0, 0
+
                         writer.writerow({
                             'timestamp': d['timestamp'],
                             'sample_idx': d['sample_idx'],
@@ -121,6 +130,9 @@ def collect_data(duration_seconds=None):
                             'acc_y': d['ay'],
                             'acc_z': d['az'],
                             'acc_magnitude': d['acc_mag'],
+                            'gravity_x': gx,
+                            'gravity_y': gy,
+                            'gravity_z': gz,
                             'linear_x': d['linear_x'],
                             'linear_y': d['linear_y'],
                             'linear_z': d['linear_z'],
