@@ -2,18 +2,15 @@
 """
 步数检测模块
 
-参考论文：
-- 《基于腰部MEMS加速度计的多阈值步数检测算法》作者：蒋博、付乐乐
-- 《分段双向去除反向重力加速度算法》作者：李兴、侯振杰、梁久祯、常兴治
+参考文献:
+蒋博, 付乐乐. 基于腰部MEMS加速度计的多阈值步数检测算法[J]. 传感器与微系统, 2018.
 
-核心算法：
-1. 使用双向角度法去除重力
-2. 滑动窗口缓存: 大小为7
-3. 三阶段检测:
-   - Flag=1: 波峰阈值检测 (全部 > T_max, 且中间最大)
+核心算法:
+1. 滑动窗口缓存: 大小为7
+2. 三阶段检测:
+   - Flag=1: 波峰阈值检测 (C[0-6] > T_max, 且中间第4个数最大)
    - Flag=2: 过零点检测 (C[3] < 0, C[2] > 0)
-   - Flag=3: 波谷阈值检测 (全部 < T_min, 且中间最小)
-4. 步频验证: 250ms-2000ms间隔
+   - Flag=3: 波谷阈值检测 (C[0-6] < T_min, 且中间第4个数最小) → 步数+1, Flag重置为1
 """
 
 import time
@@ -22,24 +19,20 @@ from collections import deque
 
 
 class StepDetector:
-    """基于《基于腰部MEMS加速度计的多阈值步数检测算法》的步数检测器"""
+    """基于多阈值步数检测算法的步数检测器"""
 
     def __init__(self, config=None):
         if config is None:
             config = {
-                "t_max": 1.5,           # 波峰阈值 (g)
-                "t_min": -0.5,          # 波谷阈值 (g)
+                "t_max": 0.12,           # 波峰阈值 (g)
+                "t_min": -0.06,          # 波谷阈值 (g)
                 "window_size": 7,        # 滑动窗口大小
-                "min_interval_ms": 250,  # 最小步间隔
-                "max_interval_ms": 2000, # 最大步间隔
             }
 
         self.config = config
-        self.t_max = config.get("t_max", 1.5)
-        self.t_min = config.get("t_min", -0.5)
+        self.t_max = config.get("t_max", 0.12)
+        self.t_min = config.get("t_min", -0.06)
         self.window_size = config.get("window_size", 7)
-        self.min_interval_sec = config.get("min_interval_ms", 250) / 1000.0
-        self.max_interval_sec = config.get("max_interval_ms", 2000) / 1000.0
 
         # 核心状态
         self.step_count = 0
@@ -47,9 +40,6 @@ class StepDetector:
 
         # 滑动窗口缓存
         self.buffer = deque(maxlen=self.window_size)
-
-        # 步数时间戳
-        self.last_step_time = 0
 
         # 最新的检测记录
         self.latest_record = None
@@ -80,15 +70,12 @@ class StepDetector:
         # 计算原始合加速度
         acc_magnitude = math.sqrt(acc_x**2 + acc_y**2 + acc_z**2)
 
-        # 使用重力去除器处理
-        if gyro_x is None or gyro_y is None or gyro_z is None:
-            linear_acc = acc_x, acc_y, acc_z
-        else:
-            linear_acc = self.gravity_remover.add_sample(
-                acc_x, acc_y, acc_z,
-                gyro_x, gyro_y, gyro_z,
-                timestamp
-            )
+        # 使用重力去除器处理（即使没有陀螺仪也进行重力去除）
+        linear_acc = self.gravity_remover.add_sample(
+            acc_x, acc_y, acc_z,
+            gyro_x, gyro_y, gyro_z,
+            timestamp
+        )
 
         linear_x, linear_y, linear_z = linear_acc
 
@@ -128,33 +115,34 @@ class StepDetector:
             return False, record
 
         # 执行三阶段检测
-        detected, record = self._detect_by_three_stage(timestamp, acc_deviation, acc_magnitude, acc_x, acc_y, acc_z)
+        detected, record = self._detect_by_three_stage(acc_deviation, acc_magnitude, acc_x, acc_y, acc_z)
 
         self.latest_record = record
         return detected, record
 
-    def _detect_by_three_stage(self, current_time, acc_deviation, acc_raw, ax, ay, az):
+    def _detect_by_three_stage(self, acc_deviation, acc_raw, ax, ay, az):
         """
         三阶段检测算法
 
         步骤:
         1. Flag=1: 波峰阈值检测 (C[0-6] > T_max, 且C[3]最大)
         2. Flag=2: 过零点检测 (C[3] < 0, C[2] > 0)
-        3. Flag=3: 波谷阈值检测 (C[0-6] < T_min, 且C[3]最小) + 步频验证
+        3. Flag=3: 波谷阈值检测 (C[0-6] < T_min, 且C[3]最小) → 步数+1, Flag重置为1
         """
         window_data = list(self.buffer)
         acc_values = [s["acc"] for s in window_data]
 
-        # 获取窗口中间值（第4个，索引3）
-        mid_idx = 3
+        # 获取窗口中间值
+        mid_idx = self.window_size // 2
         mid_acc = acc_values[mid_idx]
 
-        # 获取C[2]（索引2）
-        c2_acc = acc_values[2]
+        # 获取C[mid_idx-1]
+        c2_acc = acc_values[mid_idx - 1]
 
         # === Flag=1: 波峰阈值检测 ===
         if self.flag == 1:
             all_above_threshold = all(a > self.t_max for a in acc_values)
+            # 波峰条件：中间点比其余6个数都大
             mid_is_peak = all(mid_acc > a for i, a in enumerate(acc_values) if i != mid_idx)
 
             if all_above_threshold and mid_is_peak:
@@ -166,6 +154,13 @@ class StepDetector:
                     method="peak_detected",
                     reason="flag_1_to_2"
                 )
+            # 波峰条件不满足，flag保持为1
+            return False, self._create_record(
+                detected=False,
+                ax=ax, ay=ay, az=az, acc_mag=acc_raw,
+                acc_deviation=acc_deviation,
+                reason=f"flag_1_peak_not_found(all_above={all_above_threshold}, mid_peak={mid_is_peak})"
+            )
 
         # === Flag=2: 过零点检测 ===
         elif self.flag == 2:
@@ -178,55 +173,45 @@ class StepDetector:
                     method="zero_crossing",
                     reason="flag_2_to_3"
                 )
+            # 过零点条件不满足，flag保持为2
+            return False, self._create_record(
+                detected=False,
+                ax=ax, ay=ay, az=az, acc_mag=acc_raw,
+                acc_deviation=acc_deviation,
+                reason=f"flag_2_zero_not_found(c2={c2_acc:.3f}, mid={mid_acc:.3f})"
+            )
 
-        # === Flag=3: 波谷阈值检测 + 步频验证 ===
+        # === Flag=3: 波谷阈值检测 ===
         elif self.flag == 3:
             all_below_threshold = all(a < self.t_min for a in acc_values)
+            # 波谷条件：中间点小于其余6个数
             mid_is_valley = all(mid_acc < a for i, a in enumerate(acc_values) if i != mid_idx)
 
             if all_below_threshold and mid_is_valley:
-                # 步频验证：检查与上一次步数的时间间隔
-                time_since_last = current_time - self.last_step_time
+                # 检测到有效步数
+                self.step_count += 1
+                self.flag = 1  # 重置到第一阶段
 
-                if time_since_last >= self.min_interval_sec:
-                    # 检查是否超过最大间隔（防止重复计数）
-                    if time_since_last <= self.max_interval_sec or self.last_step_time == 0:
-                        # 检测到有效步数
-                        self.step_count += 1
-                        self.last_step_time = current_time
-                        self.flag = 1  # 重置到第一阶段
+                # 找到波谷对应的时间戳
+                valley_time = window_data[mid_idx]["timestamp"]
 
-                        # 找到波谷对应的时间戳
-                        valley_time = window_data[mid_idx]["timestamp"]
-
-                        return True, self._create_record(
-                            detected=True,
-                            ax=ax, ay=ay, az=az, acc_mag=acc_raw,
-                            acc_deviation=acc_deviation,
-                            method="valley_confirmed",
-                            threshold_upper=self.t_max,
-                            threshold_lower=self.t_min,
-                            peak_time=valley_time,
-                            reason="step_detected"
-                        )
-                    else:
-                        # 间隔太长，重置
-                        self.flag = 1
-                        return False, self._create_record(
-                            detected=False,
-                            ax=ax, ay=ay, az=az, acc_mag=acc_raw,
-                            acc_deviation=acc_deviation,
-                            reason="interval_too_long"
-                        )
-                else:
-                    # 间隔太短，忽略但重置
-                    self.flag = 1
-                    return False, self._create_record(
-                        detected=False,
-                        ax=ax, ay=ay, az=az, acc_mag=acc_raw,
-                        acc_deviation=acc_deviation,
-                        reason="interval_too_short"
-                    )
+                return True, self._create_record(
+                    detected=True,
+                    ax=ax, ay=ay, az=az, acc_mag=acc_raw,
+                    acc_deviation=acc_deviation,
+                    method="valley_confirmed",
+                    threshold_upper=self.t_max,
+                    threshold_lower=self.t_min,
+                    peak_time=valley_time,
+                    reason="step_detected"
+                )
+            # 波谷条件不满足，flag保持为3
+            return False, self._create_record(
+                detected=False,
+                ax=ax, ay=ay, az=az, acc_mag=acc_raw,
+                acc_deviation=acc_deviation,
+                reason=f"flag_3_valley_not_found(below={all_below_threshold}, valley={mid_is_valley})"
+            )
 
         # 阶段未完成
         return False, self._create_record(
@@ -305,7 +290,6 @@ class StepDetector:
         self.step_count = 0
         self.flag = 1
         self.buffer.clear()
-        self.last_step_time = 0
         self.latest_record = None
         self.stats_buffer.clear()
         self.sample_count = 0

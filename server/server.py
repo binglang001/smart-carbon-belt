@@ -201,7 +201,7 @@ def update_status():
         if current_mode == 1 and step_increment > 0:
             # 验证增量合理性：单次上报超过20步可能异常，忽略
             if step_increment <= 20:
-                carbon_increment = step_increment * 0.0014
+                carbon_increment = step_increment * 0.03
                 device_status["carbon_reduce"] = round(
                     device_status["carbon_reduce"] + carbon_increment, 4
                 )

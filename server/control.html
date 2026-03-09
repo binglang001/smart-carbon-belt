@@ -177,16 +177,9 @@
         .stat-card {
             background: rgba(255,255,255,0.15);
             border-radius: 14px;
-            padding: 16px 12px;
+            padding: 12px 10px;
             text-align: center;
             min-width: 0;
-        }
-
-        .stat-card:last-child {
-            grid-column: span 2;
-            justify-self: center;
-            min-width: 50%;
-            max-width: 50%;
         }
 
         .stat-value {
@@ -769,7 +762,6 @@
     <!-- 顶部导航栏 -->
     <div class="top-nav">
         <div class="nav-brand">
-            <span class="nav-icon">🏃</span>
             <span class="nav-title">智能运动腰带</span>
         </div>
         <div class="nav-status">
@@ -781,7 +773,7 @@
     <div class="mobile-view">
         <div class="mobile-container">
             <div class="mobile-header">
-                <h1>🏃 运动腰带</h1>
+                <h1>运动腰带</h1>
             </div>
 
             <div class="mobile-content">
@@ -800,66 +792,48 @@
                     </div>
                 </div>
 
-                <!-- 统计数据 -->
+                <!-- 统计卡片 -->
                 <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-label">今日运动</div>
-                        <div class="stat-value" id="mobileSportTime">0分</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">活动时长</div>
-                        <div class="stat-value" id="mobileActivityHours">0时</div>
-                    </div>
-                    <div class="stat-card">
+                    <div class="stat-card" style="background: linear-gradient(135deg, rgba(0,255,136,0.25), rgba(0,204,255,0.25)); border: 1px solid rgba(0,255,136,0.5);">
                         <div class="stat-label">今日步数</div>
-                        <div class="stat-value" id="mobileStep">0步</div>
+                        <div class="stat-value" id="mobileStep" style="font-size: 24px; color: #00ff88;">0步</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-label">今日减碳</div>
-                        <div class="stat-value" id="mobileCarbonReduce">0g</div>
+                        <div class="stat-label">运动时长</div>
+                        <div class="stat-value" id="mobileSportTime" style="font-size: 20px;">0分</div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card" style="background: linear-gradient(135deg, rgba(46,204,113,0.35), rgba(39,174,96,0.35)); border: 1px solid #2ecc71;">
+                        <div class="stat-label" style="font-weight: 600;">今日减碳</div>
+                        <div class="stat-value" id="mobileCarbonReduce" style="font-size: 24px; color: #2ecc71;">0g</div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, rgba(46,204,113,0.2), rgba(39,174,96,0.2));">
                         <div class="stat-label">累计减碳</div>
-                        <div class="stat-value" id="mobileCarbonReduceAll">0g</div>
+                        <div class="stat-value" id="mobileCarbonReduceAll" style="font-size: 20px; color: #2ecc71;">0g</div>
                     </div>
                 </div>
 
                 <!-- 传感器数据 -->
-                <div class="sensor-grid">
-                    <div class="sensor-card">
-                        <div class="sensor-icon">🌡️</div>
-                        <div class="sensor-info">
-                            <div class="sensor-value" id="mobileTemp">--°C</div>
-                            <div class="sensor-label">温度</div>
-                        </div>
+                <div class="sensor-grid" style="grid-template-columns: 1fr 1fr;">
+                    <div class="sensor-card" style="padding: 10px;">
+                        <div class="sensor-label" style="font-size: 12px;">温度</div>
+                        <div class="sensor-value" id="mobileTemp" style="font-size: 16px;">--°C</div>
                     </div>
-                    <div class="sensor-card">
-                        <div class="sensor-icon">💧</div>
-                        <div class="sensor-info">
-                            <div class="sensor-value" id="mobileHumi">--%</div>
-                            <div class="sensor-label">湿度</div>
-                        </div>
+                    <div class="sensor-card" style="padding: 10px;">
+                        <div class="sensor-label" style="font-size: 12px;">湿度</div>
+                        <div class="sensor-value" id="mobileHumi" style="font-size: 16px;">--%</div>
                     </div>
-                    <div class="sensor-card">
-                        <div class="sensor-icon">🏃</div>
-                        <div class="sensor-info">
-                            <div class="sensor-value" id="mobilePace">--'--"</div>
-                            <div class="sensor-label">配速</div>
-                        </div>
-                    </div>
-                    <div class="sensor-card">
-                        <div class="sensor-icon">💡</div>
-                        <div class="sensor-info">
-                            <div class="sensor-value" id="mobileBrightness">--%</div>
-                            <div class="sensor-label">亮度</div>
-                        </div>
+                </div>
+                <div class="sensor-grid" style="grid-template-columns: 1fr;">
+                    <div class="sensor-card" style="padding: 10px;">
+                        <div class="sensor-label" style="font-size: 12px;">配速</div>
+                        <div class="sensor-value" id="mobilePace" style="font-size: 16px;">--'--"</div>
                     </div>
                 </div>
 
                 <!-- 坐姿时长 -->
                 <div class="sitting-card">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <span style="font-size: 14px; font-weight: 500;">🪑 坐姿时长</span>
+                        <span style="font-size: 14px; font-weight: 500;">坐姿时长</span>
                         <span style="font-size: 12px; opacity: 0.8;" id="mobileSittingTime">0分钟</span>
                     </div>
                     <div style="font-size: 11px; opacity: 0.7; margin-bottom: 5px;" id="mobileSittingRemind">提醒倒计时: --</div>
@@ -890,7 +864,7 @@
                 <div class="emergency-container">
                     <div class="emergency-header" onclick="toggleMobileEmergency()">
                         <div style="font-size: 14px; font-weight: 500;">
-                            🚨 紧急记录 (<span id="mobileEmergencyCount">0</span>)
+                            紧急记录 (<span id="mobileEmergencyCount">0</span>)
                         </div>
                         <div style="font-size: 20px;" id="mobileEmergencyArrow">▼</div>
                     </div>
@@ -901,7 +875,7 @@
                 <div class="sport-records-container">
                     <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleMobileSportRecords()">
                         <div style="font-size: 14px; font-weight: 500;">
-                            📊 运动记录 (<span id="mobileSportRecordsCount">0</span>)
+                            运动记录 (<span id="mobileSportRecordsCount">0</span>)
                         </div>
                         <div style="font-size: 20px;" id="mobileSportRecordsArrow">▼</div>
                     </div>
@@ -912,7 +886,7 @@
                 <div class="history-container">
                     <div class="history-header" onclick="toggleMobileHistory()">
                         <div style="font-size: 14px; font-weight: 500;">
-                            📈 历史分析 (<span id="mobileHistoryDays">7</span>天)
+                            历史分析 (<span id="mobileHistoryDays">7</span>天)
                         </div>
                         <div style="font-size: 20px;" id="mobileHistoryArrow">▼</div>
                     </div>
@@ -952,11 +926,9 @@
 
                 <!-- 控制按钮 -->
                 <div class="control-buttons">
-                    <button class="control-btn" onclick="showMessageInput()">📧 发送消息</button>
-                    <button class="control-btn" onclick="showSittingSettings()">⚙️ 久坐设置</button>
-                    <button class="control-btn" onclick="toggleMobileHistory()">📈 历史分析</button>
-                    <button class="control-btn" onclick="refreshData()">🔄 刷新数据</button>
-                    <button class="control-btn" onclick="exitMessageDisplay()">❌ 退出消息</button>
+                    <button class="control-btn" onclick="showMessageInput()">发送消息</button>
+                    <button class="control-btn" onclick="showSittingSettings()">久坐设置</button>
+                    <button class="control-btn" onclick="exitMessageDisplay()">退出消息</button>
                 </div>
             </div>
         </div>
@@ -966,7 +938,7 @@
     <div class="desktop-view">
         <div class="desktop-container">
             <div class="desktop-header">
-                <h1>🏃 运动腰带控制系统</h1>
+                <h1>运动腰带控制系统</h1>
                 <p style="opacity: 0.8; margin-top: 10px;">实时监控与智能管理</p>
             </div>
 
@@ -976,13 +948,13 @@
                     <div class="card-title">模式控制</div>
                     <div class="desktop-mode-buttons">
                         <button class="mode-btn active" onclick="changeMode(0)">
-                            🏠 生活模式
+                            生活模式
                         </button>
                         <button class="mode-btn" onclick="changeMode(1)">
-                            🏃 运动模式
+                            运动模式
                         </button>
                         <button class="mode-btn" onclick="changeMode(2)">
-                            🤐 会议模式
+                            会议模式
                         </button>
                     </div>
 
@@ -1013,58 +985,52 @@
                 <div class="desktop-card">
                     <div class="card-title">实时数据</div>
 
-                    <!-- 传感器数据 - 3列 -->
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px;">
-                        <div class="desktop-stat-card" style="padding: 12px;">
-                            <div class="desktop-stat-value" id="desktopTemp" style="font-size: 20px;">--°C</div>
-                            <div class="desktop-stat-label">🌡️ 温度</div>
+                    <!-- 环境数据 - 2列 -->
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.2);">
+                        <div class="desktop-stat-card" style="padding: 15px;">
+                            <div class="desktop-stat-value" id="desktopTemp" style="font-size: 24px;">--°C</div>
+                            <div class="desktop-stat-label">温度</div>
                         </div>
-                        <div class="desktop-stat-card" style="padding: 12px;">
-                            <div class="desktop-stat-value" id="desktopHumi" style="font-size: 20px;">--%</div>
-                            <div class="desktop-stat-label">💧 湿度</div>
-                        </div>
-                        <div class="desktop-stat-card" style="padding: 12px;">
-                            <div class="desktop-stat-value" id="desktopBrightness" style="font-size: 20px;">--%</div>
-                            <div class="desktop-stat-label">💡 亮度</div>
+                        <div class="desktop-stat-card" style="padding: 15px;">
+                            <div class="desktop-stat-value" id="desktopHumi" style="font-size: 24px;">--%</div>
+                            <div class="desktop-stat-label">湿度</div>
                         </div>
                     </div>
 
-                    <!-- 运动数据 - 3列 -->
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px;">
-                        <div class="desktop-stat-card" style="padding: 12px;">
-                            <div class="desktop-stat-value" id="desktopStep" style="font-size: 20px;">--</div>
-                            <div class="desktop-stat-label">👟 步数</div>
+                    <!-- 运动数据 - 步数和运动时长 -->
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.2);">
+                        <div class="desktop-stat-card" style="padding: 15px; background: linear-gradient(135deg, rgba(0,255,136,0.2), rgba(0,204,255,0.2));">
+                            <div class="desktop-stat-value" id="desktopStep" style="font-size: 28px; color: #00ff88;">--</div>
+                            <div class="desktop-stat-label">步数</div>
                         </div>
-                        <div class="desktop-stat-card" style="padding: 12px;">
-                            <div class="desktop-stat-value" id="desktopPace" style="font-size: 20px;">--'--"</div>
-                            <div class="desktop-stat-label">⏱️ 配速</div>
-                        </div>
-                        <div class="desktop-stat-card" style="padding: 12px;">
-                            <div class="desktop-stat-value" id="desktopSportTime" style="font-size: 20px;">0分</div>
-                            <div class="desktop-stat-label">🏃 运动时长</div>
+                        <div class="desktop-stat-card" style="padding: 15px;">
+                            <div class="desktop-stat-value" id="desktopSportTime" style="font-size: 24px;">0分</div>
+                            <div class="desktop-stat-label">运动时长</div>
                         </div>
                     </div>
 
-                    <!-- 减碳和活动时长 - 3列 -->
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px;">
-                        <div class="desktop-stat-card" style="padding: 12px;">
-                            <div class="desktop-stat-value" id="desktopCarbonReduce" style="font-size: 20px;">--g</div>
-                            <div class="desktop-stat-label">🌱 今日减碳</div>
+                    <!-- 配速单独一行 -->
+                    <div class="desktop-stat-card" style="padding: 15px; background: linear-gradient(135deg, rgba(0,255,136,0.2), rgba(0,204,255,0.2)); margin-bottom: 15px;">
+                        <div class="desktop-stat-value" id="desktopPace" style="font-size: 28px; color: #00ff88;">--'--"</div>
+                        <div class="desktop-stat-label">配速</div>
+                    </div>
+
+                    <!-- 减碳数据 - 分两行 -->
+                    <div style="display: grid; grid-template-columns: 1fr; gap: 15px; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.2);">
+                        <div class="desktop-stat-card" style="padding: 20px; background: linear-gradient(135deg, rgba(46,204,113,0.3), rgba(39,174,96,0.3)); border: 2px solid #2ecc71;">
+                            <div class="desktop-stat-value" id="desktopCarbonReduce" style="font-size: 32px; color: #2ecc71;">--g</div>
+                            <div class="desktop-stat-label" style="font-size: 14px; font-weight: 600;">今日减碳</div>
                         </div>
-                        <div class="desktop-stat-card" style="padding: 12px;">
-                            <div class="desktop-stat-value" id="desktopCarbonReduceAll" style="font-size: 20px;">--g</div>
-                            <div class="desktop-stat-label">🌳 累计减碳</div>
-                        </div>
-                        <div class="desktop-stat-card" style="padding: 12px;">
-                            <div class="desktop-stat-value" id="desktopActivityHours" style="font-size: 20px;">0时</div>
-                            <div class="desktop-stat-label">✅ 活动时段</div>
+                        <div class="desktop-stat-card" style="padding: 20px; background: linear-gradient(135deg, rgba(46,204,113,0.3), rgba(39,174,96,0.3)); border: 2px solid #2ecc71;">
+                            <div class="desktop-stat-value" id="desktopCarbonReduceAll" style="font-size: 32px; color: #2ecc71;">--g</div>
+                            <div class="desktop-stat-label" style="font-size: 14px; font-weight: 600;">累计减碳</div>
                         </div>
                     </div>
 
-                    <!-- 坐姿时长 - 2列 -->
-                    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 15px; margin-top: 15px;">
+                    <!-- 活动时段和状态 - 2列 -->
+                    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 15px;">
                         <div>
-                            <div class="card-title" style="font-size: 16px; margin-bottom: 10px;">🪑 坐姿时长</div>
+                            <div class="card-title" style="font-size: 14px; margin-bottom: 10px;">坐姿时长</div>
                             <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                                 <span style="font-size: 16px; font-weight: 600;" id="desktopSittingTime">0分钟</span>
                                 <span style="font-size: 12px; opacity: 0.7;" id="desktopSittingRemind">提醒倒计时: --</span>
@@ -1072,10 +1038,16 @@
                             <div class="sitting-progress">
                                 <div class="sitting-progress-bar" id="desktopSittingProgress" style="width: 0%"></div>
                             </div>
+                            <div style="margin-top: 15px;">
+                                <div class="card-title" style="font-size: 14px; margin-bottom: 10px;">
+                                    <span>活动时段</span>
+                                    <span id="desktopActivityHours" style="margin-left: 10px;">0时</span>
+                                </div>
+                            </div>
                         </div>
-                        <div style="padding: 10px; background: rgba(255,255,255,0.1); border-radius: 10px; text-align: center;">
+                        <div style="padding: 15px; background: rgba(255,255,255,0.1); border-radius: 10px; text-align: center;">
                             <div style="font-size: 14px; font-weight: 500;">设备状态</div>
-                            <div style="font-size: 12px; opacity: 0.7; margin-top: 5px; margin-bottom: 5px;" id="desktopLastUpdate">--</div>
+                            <div style="font-size: 12px; opacity: 0.7; margin-top: 10px; margin-bottom: 10px;" id="desktopLastUpdate">--</div>
                             <div class="status-indicator" id="desktopStatus" style="margin: 0 auto;"></div>
                         </div>
                     </div>
@@ -1083,62 +1055,71 @@
 
                 <!-- 记录 -->
                 <div class="desktop-card">
-                    <div class="card-title">📊 运动记录</div>
+                    <div class="card-title">运动记录</div>
                     <div style="max-height: 300px; overflow-y: auto; margin-bottom: 20px;" id="desktopSportRecordsList">
                         <div style="text-align: center; padding: 40px; opacity: 0.5;">
                             暂无运动记录
                         </div>
                     </div>
 
-                    <div class="card-title">🚨 紧急记录</div>
+                    <div class="card-title">紧急记录</div>
                     <div style="max-height: 300px; overflow-y: auto;" id="desktopEmergencyList">
                         <div style="text-align: center; padding: 40px; opacity: 0.5;">
                             暂无紧急记录
                         </div>
                     </div>
 
-                    <!-- 历史数据分析 -->
-                    <div class="card-title" style="margin-top: 20px;">📈 历史数据分析</div>
-                    <div style="margin-bottom: 15px;">
-                        <div class="history-days-selector">
-                            <button class="history-day-btn" onclick="loadHistoryData(7)">7天</button>
-                            <button class="history-day-btn active" onclick="loadHistoryData(14)">14天</button>
-                            <button class="history-day-btn" onclick="loadHistoryData(30)">30天</button>
+                    <!-- 历史数据分析 - 可折叠 -->
+                    <div style="margin-top: 20px;">
+                        <div class="history-header" onclick="toggleDesktopHistory()" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 2px solid rgba(255,255,255,0.2);">
+                            <div class="card-title" style="margin: 0; border: none; padding: 0;">历史数据分析</div>
+                            <div style="font-size: 20px;" id="desktopHistoryArrow">▼</div>
                         </div>
-                    </div>
-                    <!-- 统计卡片 -->
-                    <div class="history-stats">
-                        <div class="history-stat-card">
-                            <div class="history-stat-label">总步数</div>
-                            <div class="history-stat-value" id="desktopHistoryTotalSteps">0</div>
+                        <div class="history-content" id="desktopHistoryContent" style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out;">
+                            <div style="padding-top: 15px;">
+                                <div style="margin-bottom: 15px;">
+                                    <div class="history-days-selector">
+                                        <button class="history-day-btn" onclick="loadHistoryData(7)">7天</button>
+                                        <button class="history-day-btn active" onclick="loadHistoryData(14)">14天</button>
+                                        <button class="history-day-btn" onclick="loadHistoryData(30)">30天</button>
+                                    </div>
+                                </div>
+                                <!-- 统计卡片 -->
+                                <div class="history-stats">
+                                    <div class="history-stat-card">
+                                        <div class="history-stat-label">总步数</div>
+                                        <div class="history-stat-value" id="desktopHistoryTotalSteps">0</div>
+                                    </div>
+                                    <div class="history-stat-card">
+                                        <div class="history-stat-label">总时长</div>
+                                        <div class="history-stat-value" id="desktopHistoryTotalTime">0分</div>
+                                    </div>
+                                    <div class="history-stat-card">
+                                        <div class="history-stat-label">总减碳</div>
+                                        <div class="history-stat-value" id="desktopHistoryTotalCarbon">0g</div>
+                                    </div>
+                                    <div class="history-stat-card">
+                                        <div class="history-stat-label">日均步数</div>
+                                        <div class="history-stat-value" id="desktopHistoryAvgSteps">0</div>
+                                    </div>
+                                </div>
+                                <!-- 步数趋势图 -->
+                                <div class="history-chart-container">
+                                    <div class="history-chart-title">步数趋势</div>
+                                    <canvas id="desktopHistoryStepsChart" style="height: 200px;"></canvas>
+                                </div>
+                                <!-- 运动时长趋势图 -->
+                                <div class="history-chart-container" style="margin-top: 15px;">
+                                    <div class="history-chart-title">运动时长趋势 (分钟)</div>
+                                    <canvas id="desktopHistoryTimeChart" style="height: 200px;"></canvas>
+                                </div>
+                                <!-- 碳排放趋势图 -->
+                                <div class="history-chart-container" style="margin-top: 15px;">
+                                    <div class="history-chart-title">碳减排趋势 (克)</div>
+                                    <canvas id="desktopHistoryCarbonChart" style="height: 200px;"></canvas>
+                                </div>
+                            </div>
                         </div>
-                        <div class="history-stat-card">
-                            <div class="history-stat-label">总时长</div>
-                            <div class="history-stat-value" id="desktopHistoryTotalTime">0分</div>
-                        </div>
-                        <div class="history-stat-card">
-                            <div class="history-stat-label">总减碳</div>
-                            <div class="history-stat-value" id="desktopHistoryTotalCarbon">0g</div>
-                        </div>
-                        <div class="history-stat-card">
-                            <div class="history-stat-label">日均步数</div>
-                            <div class="history-stat-value" id="desktopHistoryAvgSteps">0</div>
-                        </div>
-                    </div>
-                    <!-- 步数趋势图 -->
-                    <div class="history-chart-container">
-                        <div class="history-chart-title">步数趋势</div>
-                        <canvas id="desktopHistoryStepsChart" style="height: 200px;"></canvas>
-                    </div>
-                    <!-- 运动时长趋势图 -->
-                    <div class="history-chart-container" style="margin-top: 15px;">
-                        <div class="history-chart-title">运动时长趋势 (分钟)</div>
-                        <canvas id="desktopHistoryTimeChart" style="height: 200px;"></canvas>
-                    </div>
-                    <!-- 碳排放趋势图 -->
-                    <div class="history-chart-container" style="margin-top: 15px;">
-                        <div class="history-chart-title">碳减排趋势 (克)</div>
-                        <canvas id="desktopHistoryCarbonChart" style="height: 200px;"></canvas>
                     </div>
                 </div>
             </div>
@@ -1148,7 +1129,7 @@
     <!-- 设置弹窗 -->
     <div class="modal" id="settingsModal">
         <div class="modal-content">
-            <div class="modal-title">⚙️ 久坐提醒设置</div>
+            <div class="modal-title">久坐提醒设置</div>
             <div class="input-group">
                 <label class="input-label">提醒时长（分钟）</label>
                 <input type="number" class="input-field" id="modalSittingDuration" 
@@ -1179,10 +1160,7 @@
             initMobileSlider();
             loadSettings();
             refreshData();
-            // 桌面端默认加载历史数据
-            if (window.innerWidth > 768) {
-                loadHistoryData(currentHistoryDays);
-            }
+            // 桌面端默认不加载历史数据，用户点击展开时再加载
             setInterval(refreshData, 2000);
         });
 
@@ -1278,9 +1256,7 @@
             document.getElementById('mobileTemp').textContent = data.temperature + '°C';
             document.getElementById('mobileHumi').textContent = data.humidity + '%';
             document.getElementById('mobilePace').textContent = data.pace_str;
-            document.getElementById('mobileBrightness').textContent = Math.round(data.brightness / 255 * 100) + '%';
             document.getElementById('mobileSportTime').textContent = sportMinutes + '分';
-            document.getElementById('mobileActivityHours').textContent = activityHours + '时';
             document.getElementById('mobileStep').textContent = stepCount + '步';
             document.getElementById('mobileCarbonReduce').textContent = carbonReduce + 'g';
             document.getElementById('mobileCarbonReduceAll').textContent = carbonReduceAll + 'g';
@@ -1312,7 +1288,6 @@
             document.getElementById('desktopTemp').textContent = data.temperature + '°C';
             document.getElementById('desktopHumi').textContent = data.humidity + '%';
             document.getElementById('desktopPace').textContent = data.pace_str;
-            document.getElementById('desktopBrightness').textContent = Math.round(data.brightness / 255 * 100) + '%';
             document.getElementById('desktopSportTime').textContent = sportMinutes + '分';
             document.getElementById('desktopActivityHours').textContent = activityHours + '时';
             document.getElementById('desktopStep').textContent = stepCount + '步';
@@ -1504,12 +1479,12 @@
 
                 // 更新统计卡片
                 document.getElementById('mobileHistoryTotalSteps').textContent = totalSteps.toLocaleString();
-                document.getElementById('mobileHistoryTotalTime').textContent = Math.floor(totalTime / 60) + '分钟';
+                document.getElementById('mobileHistoryTotalTime').textContent = Math.floor(totalTime / 60) + '分';
                 document.getElementById('mobileHistoryTotalCarbon').textContent = Math.round(totalCarbon * 100) / 100 + 'g';
                 document.getElementById('mobileHistoryAvgSteps').textContent = validDays > 0 ? Math.round(totalSteps / validDays).toLocaleString() : '0';
 
                 document.getElementById('desktopHistoryTotalSteps').textContent = totalSteps.toLocaleString();
-                document.getElementById('desktopHistoryTotalTime').textContent = Math.floor(totalTime / 60) + '分钟';
+                document.getElementById('desktopHistoryTotalTime').textContent = Math.floor(totalTime / 60) + '分';
                 document.getElementById('desktopHistoryTotalCarbon').textContent = Math.round(totalCarbon * 100) / 100 + 'g';
                 document.getElementById('desktopHistoryAvgSteps').textContent = validDays > 0 ? Math.round(totalSteps / validDays).toLocaleString() : '0';
 
@@ -1653,6 +1628,22 @@
                 loadHistoryData(currentHistoryDays);
             } else {
                 content.classList.remove('expanded');
+                arrow.textContent = '▼';
+            }
+        }
+
+        // PC端切换历史数据展开/收起
+        function toggleDesktopHistory() {
+            const content = document.getElementById('desktopHistoryContent');
+            const arrow = document.getElementById('desktopHistoryArrow');
+
+            if (content.style.maxHeight === '0px' || content.style.maxHeight === '') {
+                content.style.maxHeight = '800px';
+                arrow.textContent = '▲';
+                // 加载历史数据
+                loadHistoryData(currentHistoryDays);
+            } else {
+                content.style.maxHeight = '0px';
                 arrow.textContent = '▼';
             }
         }

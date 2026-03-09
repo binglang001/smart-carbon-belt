@@ -16,6 +16,9 @@ import argparse
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 导入配置文件
+import config
+
 # 导入日志模块
 from utils.logger import get_logger
 logger = get_logger('tools.step_counter')
@@ -43,14 +46,12 @@ def load_data(csv_file):
     return data
 
 
-def run_step_detection(csv_file, t_max=1.5, t_min=-0.5):
+def run_step_detection(csv_file):
     """
     运行步数检测
 
     参数:
         csv_file: CSV数据文件路径
-        t_max: 波峰阈值 (g)
-        t_min: 波谷阈值 (g)
     """
     # 加载数据
     data = load_data(csv_file)
@@ -74,31 +75,71 @@ def run_step_detection(csv_file, t_max=1.5, t_min=-0.5):
     # 使用主程序的StepDetector
     from sensors.step_detector import StepDetector
 
-    config = {
-        "t_max": t_max,
-        "t_min": t_min,
-        "window_size": 7,
-        "min_interval_ms": 250,
-        "max_interval_ms": 2000,
+    # 从配置文件读取参数
+    step_config = config.STEP_CONFIG
+    gravity_config = config.GRAVITY_REMOVER_CONFIG
+
+    detector_config = {
+        "t_max": step_config.get("t_max", 0.12),
+        "t_min": step_config.get("t_min", -0.06),
+        "window_size": step_config.get("window_size", 7),
     }
-    detector = StepDetector(config)
+    detector = StepDetector(detector_config)
+
+    # 设置重力去除参数
+    detector.gravity_remover.set_parameters(
+        alpha=gravity_config.get("filter_alpha", 0.3),
+        window=gravity_config.get("filter_window", 5)
+    )
+
+    logger.info(f"重力去除参数: alpha={gravity_config.get('filter_alpha')}, window={gravity_config.get('filter_window')}")
+    logger.info(f"检测参数: T_max={detector_config['t_max']}, T_min={detector_config['t_min']}, "
+                f"窗口大小={detector_config['window_size']}")
 
     # 逐样本添加进行步数检测
     steps_detected = []
+    flag_counts = {1: 0, 2: 0, 3: 0}
+    flag1_failures = {}
+    flag2_failures = {}
+    flag3_failures = {}
+
     for i, sample in enumerate(data):
-        linear_x = sample['linear_x']
-        linear_y = sample['linear_y']
-        linear_z = sample['linear_z']
+        # 使用原始加速度，让 StepDetector 内部进行重力去除处理
+        acc_x = sample['acc_x']
+        acc_y = sample['acc_y']
+        acc_z = sample['acc_z']
         timestamp = sample['timestamp']
 
-        # 使用线性加速度的合量进行检测
-        step_detected, _ = detector.add_sample(
-            linear_x, linear_y, linear_z,
+        step_detected, record = detector.add_sample(
+            acc_x, acc_y, acc_z,
             timestamp=timestamp
         )
 
+        # 统计flag状态
+        flag_counts[detector.flag] = flag_counts.get(detector.flag, 0) + 1
+
+        # 统计各阶段失败原因
+        reason = record.get('reason', '')
+        if 'flag_1' in reason:
+            flag1_failures[reason] = flag1_failures.get(reason, 0) + 1
+        elif 'flag_2' in reason:
+            flag2_failures[reason] = flag2_failures.get(reason, 0) + 1
+        elif 'flag_3' in reason:
+            flag3_failures[reason] = flag3_failures.get(reason, 0) + 1
+
         if step_detected:
             steps_detected.append(timestamp)
+
+    logger.info(f"Flag状态统计: {flag_counts}")
+    if flag1_failures:
+        total_f1 = sum(flag1_failures.values())
+        logger.info(f"Flag1失败: {total_f1}次 - {flag1_failures}")
+    if flag2_failures:
+        total_f2 = sum(flag2_failures.values())
+        logger.info(f"Flag2失败: {total_f2}次 - {flag2_failures}")
+    if flag3_failures:
+        total_f3 = sum(flag3_failures.values())
+        logger.info(f"Flag3失败: {total_f3}次 - {flag3_failures}")
 
     # 输出结果
     step_count = detector.get_step_count()
@@ -116,19 +157,44 @@ def run_step_detection(csv_file, t_max=1.5, t_min=-0.5):
     return step_count
 
 
+def find_latest_data_file():
+    """查找最新的数据文件"""
+    search_dirs = ['data/gravity', 'data']
+    csv_files = []
+
+    for data_dir in search_dirs:
+        if os.path.exists(data_dir):
+            for f in os.listdir(data_dir):
+                if f.endswith('.csv'):
+                    csv_files.append(os.path.join(data_dir, f))
+
+    if not csv_files:
+        return None
+
+    csv_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+    return csv_files[0]
+
+
 def main():
     parser = argparse.ArgumentParser(description='步数检测 - 使用主程序模块')
-    parser.add_argument('file', help='CSV数据文件路径')
-    parser.add_argument('--t-max', type=float, default=1.5, help='波峰阈值 (默认1.5g)')
-    parser.add_argument('--t-min', type=float, default=-0.5, help='波谷阈值 (默认-0.5g)')
+    parser.add_argument('file', nargs='?', help='CSV数据文件路径（默认自动查找最新）')
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.file):
-        logger.error(f"文件不存在: {args.file}")
+    # 自动查找最新文件
+    input_file = args.file
+    if not input_file:
+        input_file = find_latest_data_file()
+        if not input_file:
+            logger.error("未找到数据文件，请先运行 data_collector.py 采集数据")
+            return
+
+    if not os.path.exists(input_file):
+        logger.error(f"文件不存在: {input_file}")
         return
 
-    run_step_detection(args.file, args.t_max, args.t_min)
+    logger.info(f"分析文件: {input_file}")
+    run_step_detection(input_file)
 
 
 if __name__ == '__main__':

@@ -2,9 +2,11 @@
 """
 姿态检测模块
 
-检测人体姿态（坐姿/站立/行走）
-参考论文：《基于加速度传感器的人体姿态识别研究-李毅》
-         《基于腰部MEMS加速度计的多阈值步数检测算法》
+检测人体姿态(坐姿/站立/行走)
+
+参考文献:
+李毅. 基于加速度传感器的人体姿态识别研究[J]. 民间科技, 2022.
+卢先领, 王洪斌, 王莹莹, 徐保国. 一种基于加速度传感器的人体跌倒识别方法[J]. 计算机应用研究, 2013, 30(4).
 
 核心方法:
 1. Roll角检测 - 基于绝对翻滚角判断坐/站
@@ -143,24 +145,24 @@ class PostureDetector:
 
     def _determine_posture_by_pitch(self, pitch, motion_detected):
         """
-        基于Pitch角的姿态检测（论文表1标准）
+        基于Pitch角的姿态检测
 
-        论文：+Z轴与水平面夹角
-        - pitch < -70°: 站立
-        - -70° ≤ pitch < -30°: 坐姿
-        - pitch ≥ -30°: 躺卧
+        实际测试：
+        - 站姿 pitch ≈ 89°
+        - 坐姿 pitch ≈ 30-80°
+        - 躺卧 pitch ≈ 0°
         """
         # 如果检测到明显运动，可能是行走/跑步
         if motion_detected:
             return "moving"
 
-        # 根据pitch角判断（论文表1）
-        if pitch < -70:
+        # 根据pitch角判断
+        if pitch > 80:
             return "standing"
-        elif pitch >= -30:
+        elif pitch < 30:
             return "lying"
         else:
-            # -70到-30之间为坐姿
+            # 30到70之间为坐姿
             return "sitting"
 
     def get_posture(self):

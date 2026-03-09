@@ -93,7 +93,7 @@ def collect_data(duration_seconds=None):
         # 重力加速度（用于重力去除分析）
         'gravity_x', 'gravity_y', 'gravity_z',
         # 线性加速度（用于步数检测）
-        'linear_x', 'linear_y', 'linear_z',
+        'linear_x', 'linear_y', 'linear_z', 'linear_magnitude',
     ]
 
     sample_count = 0

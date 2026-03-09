@@ -296,27 +296,6 @@ def analyze_three_stage_detection(data, real_step_count=None):
     return results
 
 
-def analyze_gyro_data(data):
-    """分析陀螺仪数据"""
-    logger.info("\n" + "=" * 60)
-    logger.info("[陀螺仪数据统计] 论文2: 用于双向角度积分")
-    logger.info("=" * 60)
-
-    gyro_x = [d['gyro_x'] for d in data]
-    gyro_y = [d['gyro_y'] for d in data]
-    gyro_z = [d['gyro_z'] for d in data]
-
-    x_stats = calculate_basic_stats(gyro_x)
-    y_stats = calculate_basic_stats(gyro_y)
-    z_stats = calculate_basic_stats(gyro_z)
-
-    logger.info(f"  X轴: mean={x_stats['mean']:.2f}°/s, std={x_stats['std']:.2f}")
-    logger.info(f"  Y轴: mean={y_stats['mean']:.2f}°/s, std={y_stats['std']:.2f}")
-    logger.info(f"  Z轴: mean={z_stats['mean']:.2f}°/s, std={z_stats['std']:.2f}")
-
-    return {'x': x_stats, 'y': y_stats, 'z': z_stats}
-
-
 def analyze_data(csv_file, real_step_count=None):
     """完整分析数据"""
     logger.info("=" * 60)
@@ -352,9 +331,6 @@ def analyze_data(csv_file, real_step_count=None):
     # 5. 三阶段阈值检测分析
     three_stage_results = analyze_three_stage_detection(data, real_step_count)
 
-    # 6. 陀螺仪数据
-    gyro_stats = analyze_gyro_data(data)
-
     # 总结
     logger.info("\n" + "=" * 60)
     logger.info("[分析总结]")
@@ -368,22 +344,48 @@ def analyze_data(csv_file, real_step_count=None):
         'raw_stats': raw_stats,
         'linear_stats': linear_stats,
         'zero_stats': zero_stats,
-        'gyro_stats': gyro_stats,
     }
+
+
+def find_latest_data_file():
+    """查找最新的数据文件"""
+    search_dirs = ['data/gravity', 'data']
+    csv_files = []
+
+    for data_dir in search_dirs:
+        if os.path.exists(data_dir):
+            for f in os.listdir(data_dir):
+                if f.endswith('.csv'):
+                    csv_files.append(os.path.join(data_dir, f))
+
+    if not csv_files:
+        return None
+
+    csv_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+    return csv_files[0]
 
 
 def main():
     parser = argparse.ArgumentParser(description='步态数据分析 - 论文算法')
-    parser.add_argument('input', help='输入CSV文件')
+    parser.add_argument('input', nargs='?', help='输入CSV文件（默认自动查找最新）')
     parser.add_argument('-r', '--real-steps', type=int, help='实际步数（用于比对）')
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.input):
-        logger.info(f"错误: 文件不存在: {args.input}")
+    # 自动查找最新文件
+    input_file = args.input
+    if not input_file:
+        input_file = find_latest_data_file()
+        if not input_file:
+            logger.error("未找到数据文件，请先运行 data_collector.py 采集数据")
+            return
+
+    if not os.path.exists(input_file):
+        logger.error(f"文件不存在: {input_file}")
         return
 
-    analyze_data(args.input, args.real_steps)
+    logger.info(f"分析文件: {input_file}")
+    analyze_data(input_file, args.real_steps)
 
 
 if __name__ == '__main__':

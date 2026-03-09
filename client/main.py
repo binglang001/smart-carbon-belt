@@ -25,6 +25,7 @@ import sys
 import os
 import json
 import requests
+import traceback
 from datetime import datetime, timedelta
 
 # 导入日志模块
@@ -32,7 +33,7 @@ from utils.logger import get_logger
 logger = get_logger('main')
 
 # ==================== 传感器模块（核心算法）====================
-# 优先使用sensors模块的修复版本
+# 使用sensors模块版本
 USE_SENSORS_MODULE = True
 
 # 先导入config（必须在使用sensors之前）
@@ -63,7 +64,9 @@ try:
     logger.info("使用sensors模块 (50Hz采样)")
 except ImportError as e:
     sensors_module_available = False
-    logger.warning(f"sensors模块不可用: {e}")
+    logger.critical(f"sensors模块加载失败: {e}\n{traceback.format_exc()}")
+    print(f"FATAL: sensors模块加载失败: {e}")
+    sys.exit(1)
 
 # 高频采样器实例
 sampler = None
@@ -249,7 +252,7 @@ def _to_pin(pin_str):
     return pin_str
 
 PIN_DHT11 = _to_pin(config.PIN_DHT11)
-PIN_BUTTON = _to_pin(config.PIN_BUTTON)
+PIN_TOUCH = _to_pin(config.PIN_TOUCH)
 PIN_KNOB = _to_pin(config.PIN_KNOB)
 PIN_LED = _to_pin(config.PIN_LED)
 LED_COUNT = config.LED_COUNT
@@ -283,9 +286,13 @@ running = True
 voice_enabled = True
 last_movement_time = None
 exit_sport_countdown = False
-button_press_start = None
+env_auto_exit_start_time = None  # 环境恶劣自动退出开始时间
+env_exit_cancelled_by_touch = False  # 环境退出是否被触摸板取消
+touch_press_start = None
 long_press_threshold = 2.0  # 长按阈值改为2秒
 double_click_interval = 0.7  # 双击最大间隔
+double_click_cooldown = 10.0  # 双击冷却时间10秒
+double_click_last_time = 0  # 上次双击触发时间
 last_click_time = None  # 上次点击时间
 long_press_2s_voiced = False  # 长按2秒语音是否已播报
 sitting_remind_duration = config.DEFAULT_SITTING_REMIND_DURATION
@@ -294,14 +301,30 @@ carbon_reduce_count = 0
 
 # 配速显示
 current_pace_str = "--'--\""  # 当前配速显示
+last_valid_pace_str = "--'--\""  # 最近一次有效配速
+has_valid_pace = False  # 是否出现过有效配速
 
-# GPS速度读取计时器（30秒）
+# 平均配速计算（用于运动记录）
+sport_pace_total_distance = 0.0  # 运动期间总距离(km)
+sport_pace_total_time = 0.0  # 运动期间总时间(秒)
+sport_pace_start_time = None  # 第一次有效配速计时开始时间
+
+# GPS速度读取计时器（10秒）
 gps_speed_read_time = None  # 上次读取GPS速度的时间
 gps_current_speed = None  # 当前GPS速度(km/h)
+
+# GNSS有效状态
+gnss_valid = False  # GNSS是否有效（卫星数>4）
+gnss_last_check_time = None  # 上次检查GNSS有效性的时间
+gnss_searching = False  # 是否正在搜星
+gnss_search_start_time = None  # 搜星开始时间
+gnss_search_thread = None  # 搜星线程
 
 # 步数配速计算计时器
 step_pace_start_time = None  # 步数配速计算开始时间
 step_pace_last_step = 0  # 上次记录的步数
+step_pace_accumulated_distance = 0.0  # 步数配速累计距离
+step_pace_accumulated_time = 0.0  # 步数配速累计时间
 
 # UI元素
 ui_elements = {}
@@ -347,7 +370,7 @@ signal.signal(signal.SIGTERM, exit_handler)
 
 # ==================== 硬件对象 ====================
 dht11 = None
-button = None
+touch = None
 knob = None
 led_strip = None
 tts = None
@@ -356,7 +379,7 @@ gui = None
 
 # ==================== UI初始化 ====================
 def init_ui():
-    """初始化UI"""
+    """初始化UI - 创建所有模式的UI元素"""
     global ui_elements
 
     if not gui:
@@ -366,168 +389,150 @@ def init_ui():
     gui.clear()
     ui_elements = {}
 
-    # 绘制背景图片（根据当前模式）
-    if current_mode == MODE_LIFE:
-        ui_elements['background'] = gui.draw_image(image="ui/life_mode.png", x=0, y=0)
-    elif current_mode == MODE_SPORT:
-        ui_elements['background'] = gui.draw_image(image="ui/sport_mode.png", x=0, y=0)
-    # 会议模式不画背景（全黑）
+    # ========== 创建生活模式UI元素 ==========
+    # 背景（先创建）
+    ui_elements['background_life'] = gui.draw_image(image="ui/life_mode.png", x=0, y=0)
 
-    # 时间（所有模式，angle=90表示横放）
+    # 温度
+    ui_elements['temp_text'] = gui.draw_text(
+        text="--°C",
+        x=178, y=223,
+        font_size=11, color="#F17D30", angle=90, origin='center'
+    )
+
+    # 湿度
+    ui_elements['humi_text'] = gui.draw_text(
+        text="-- %",
+        x=201, y=221,
+        font_size=11, color="#5A84F2", angle=90, origin='center'
+    )
+
+    # 坐姿时长
+    ui_elements['sitting_text'] = gui.draw_text(
+        text="0分钟",
+        x=213, y=217,
+        font_size=11, color="#000000", angle=90
+    )
+
+    # 环境状态
+    ui_elements['env_status'] = gui.draw_text(
+        text="适宜",
+        x=175, y=115,
+        font_size=18, color="#808080", angle=90, origin='center'
+    )
+
+    # ========== 创建运动模式UI元素 ==========
+    # 背景
+    ui_elements['background_sport'] = gui.draw_image(image="ui/sport_mode.png", x=0, y=0)
+
+    # 步数
+    ui_elements['step_text'] = gui.draw_text(
+        text="0 步",
+        x=197, y=280,
+        font_size=11, color="#000000", angle=90, origin='center'
+    )
+
+    # 配速
+    ui_elements['pace_text'] = gui.draw_text(
+        text="--'--\"",
+        x=220, y=245,
+        font_size=11, color="#000000", angle=90
+    )
+
+    # 减碳量
+    ui_elements['carbon_reduce_text'] = gui.draw_text(
+        text="0.00g",
+        x=181, y=95,
+        font_size=18, color="#8AD70D", angle=90, origin='center'
+    )
+
+    # ========== 创建会议模式UI元素 ==========
+    # 黑色背景
+    ui_elements['meeting_black'] = gui.fill_rect(x=0, y=0, w=240, h=320, color="#000000")
+
+    # ========== 时间文本（最后创建，确保显示在最前面）==========
     ui_elements['time_text'] = gui.draw_text(
         text="00:00:00",
         x=0, y=320,
         font_size=25, color="#000000", angle=90
     )
 
-    if current_mode == MODE_LIFE:
-        # 温度
-        ui_elements['temp_text'] = gui.draw_text(
-            text="--°C",
-            x=178, y=223,
-            font_size=11, color="#F17D30", angle=90, origin='center'
-        )
-        # 湿度
-        ui_elements['humi_text'] = gui.draw_text(
-            text="-- %",
-            x=201, y=221,
-            font_size=11, color="#5A84F2", angle=90, origin='center'
-        )
-        # 坐姿时长
-        ui_elements['sitting_text'] = gui.draw_text(
-            text="0分钟",
-            x=213, y=217,
-            font_size=11, color="#000000", angle=90
-        )
-        # 环境状态（默认适宜）
-        ui_elements['env_status'] = gui.draw_text(
-            text="适宜",
-            x=163, y=139,
-            font_size=18, color="#808080", angle=90
-        )
-
-    elif current_mode == MODE_SPORT:
-        # 步数
-        ui_elements['step_text'] = gui.draw_text(
-            text="0 步",
-            x=197, y=280,
-            font_size=11, color="#000000", angle=90, origin='center'
-        )
-        # 配速
-        ui_elements['pace_text'] = gui.draw_text(
-            text="--'--\"",
-            x=220, y=245,
-            font_size=11, color="#000000", angle=90
-        )
-        # 减碳量
-        ui_elements['carbon_reduce_text'] = gui.draw_text(
-            text="0.00g",
-            x=181, y=95,
-            font_size=18, color="#8AD70D", angle=90, origin='center'
-        )
+    # 根据当前模式显示对应的UI
+    update_ui_mode()
 
 
 def update_ui_mode():
-    """根据模式更新UI显示"""
+    """根据模式更新UI显示 - 隐藏/显示方式"""
     global ui_elements
 
     if message_showing:
         return
 
-    # 清空当前所有UI元素
-    for key in list(ui_elements.keys()):
-        try:
-            ui_elements[key].remove()
-        except:
-            pass
+    # 隐藏所有模式的UI元素
+    hide_all_ui()
 
-    # 重新绘制背景和UI
+    # 显示当前模式的UI元素
     if current_mode == MODE_LIFE:
-        # 背景
-        ui_elements['background'] = gui.draw_image(image="ui/life_mode.png", x=0, y=0)
-
-        # 时间
-        now_str = datetime.now().strftime('%H:%M:%S')
-        ui_elements['time_text'] = gui.draw_text(
-            text=now_str,
-            x=0, y=320,
-            font_size=25, color="#000000", angle=90
-        )
-
-        # 温度
-        ui_elements['temp_text'] = gui.draw_text(
-            text="--°C",
-            x=178, y=223,
-            font_size=11, color="#F17D30", angle=90, origin='center'
-        )
-
-        # 湿度
-        ui_elements['humi_text'] = gui.draw_text(
-            text="-- %",
-            x=201, y=223,
-            font_size=11, color="#5A84F2", angle=90, origin='center'
-        )
-
-        # 坐姿时长
-        ui_elements['sitting_text'] = gui.draw_text(
-            text="0分钟",
-            x=213, y=217,
-            font_size=11, color="#000000", angle=90
-        )
-
-        # 环境状态（支持两个状态显示）
-        ui_elements['env_status'] = gui.draw_text(
-            text="适宜",
-            x=163, y=139,
-            font_size=18, color="#808080", angle=90
-        )
-        ui_elements['env_status_2'] = gui.draw_text(
-            text="",
-            x=163, y=165,
-            font_size=18, color="#808080", angle=90
-        )
+        # 显示生活模式UI
+        ui_elements['background_life'].config(state='normal')
+        ui_elements['time_text'].config(state='normal')
+        ui_elements['temp_text'].config(state='normal')
+        ui_elements['humi_text'].config(state='normal')
+        ui_elements['sitting_text'].config(state='normal')
+        ui_elements['env_status'].config(state='normal')
 
     elif current_mode == MODE_SPORT:
-        # 背景
-        ui_elements['background'] = gui.draw_image(image="ui/sport_mode.png", x=0, y=0)
-
-        # 时间
-        now_str = datetime.now().strftime('%H:%M:%S')
-        ui_elements['time_text'] = gui.draw_text(
-            text=now_str,
-            x=0, y=320,
-            font_size=25, color="#000000", angle=90
-        )
-
-        # 步数
-        ui_elements['step_text'] = gui.draw_text(
-            text="0 步",
-            x=197, y=280,
-            font_size=11, color="#000000", angle=90, origin='center'
-        )
-
-        # 配速
-        ui_elements['pace_text'] = gui.draw_text(
-            text="--'--\"",
-            x=220, y=245,
-            font_size=11, color="#000000", angle=90
-        )
-
-        # 减碳量
-        ui_elements['carbon_reduce_text'] = gui.draw_text(
-            text="0.00g",
-            x=181, y=95,
-            font_size=18, color="#8AD70D", angle=90, origin='center'
-        )
+        # 显示运动模式背景
+        ui_elements['background_sport'].config(state='normal')
+        # 显示时间文本（最后创建，显示在最前面）
+        ui_elements['time_text'].config(state='normal')
+        ui_elements['step_text'].config(state='normal')
+        ui_elements['pace_text'].config(state='normal')
+        ui_elements['carbon_reduce_text'].config(state='normal')
 
     elif current_mode == MODE_MEETING:
-        # 会议模式完全黑屏
-        gui.clear()
+        # 会议模式显示黑色背景
+        ui_elements['meeting_black'].config(state='normal')
+
+
+def hide_all_ui():
+    """隐藏所有UI元素"""
+    global ui_elements
+
+    # 生活模式UI
+    if 'background_life' in ui_elements:
+        ui_elements['background_life'].config(state='hidden')
+    if 'temp_text' in ui_elements:
+        ui_elements['temp_text'].config(state='hidden')
+    if 'humi_text' in ui_elements:
+        ui_elements['humi_text'].config(state='hidden')
+    if 'sitting_text' in ui_elements:
+        ui_elements['sitting_text'].config(state='hidden')
+    if 'env_status' in ui_elements:
+        ui_elements['env_status'].config(state='hidden')
+
+    # 运动模式UI
+    if 'background_sport' in ui_elements:
+        ui_elements['background_sport'].config(state='hidden')
+    if 'step_text' in ui_elements:
+        ui_elements['step_text'].config(state='hidden')
+    if 'pace_text' in ui_elements:
+        ui_elements['pace_text'].config(state='hidden')
+    if 'carbon_reduce_text' in ui_elements:
+        ui_elements['carbon_reduce_text'].config(state='hidden')
+
+    # 会议模式UI
+    if 'meeting_black' in ui_elements:
+        ui_elements['meeting_black'].config(state='hidden')
+
+    # 共用UI
+    if 'time_text' in ui_elements:
+        ui_elements['time_text'].config(state='hidden')
 
 
 # ==================== 环境状态判断 ====================
 def get_environment_status():
-    """获取环境状态，返回(状态列表, 语音播报文本)"""
+    """获取环境状态，返回(状态列表, 语音播报文本，警告等级)"""
     global last_temp, last_humi
 
     temp_status = []
@@ -592,29 +597,33 @@ def get_environment_status():
         voice_text = "当前环境状态适宜"
     else:
         # 有警报
-        need_temp_tip = False
-        need_humi_tip = False
+        temp_tip_level = 0
+        humi_tip_level = 0
 
-        if "寒冷" in temp_status or "偏冷" in temp_status:
-            need_temp_tip = True
-        elif "炎热" in temp_status or "偏热" in temp_status:
-            need_temp_tip = True
+        if any(s in ['寒冷', '偏冷'] for s in  temp_status):
+            temp_tip_level = -1
+        elif any(s == '偏热' for s in  temp_status):
+            temp_tip_level = 1
+        elif any(s == '严寒' for s in  temp_status):
+            temp_tip_level = -2
+        elif any(s == '炎热' for s in  temp_status):
+            temp_tip_level = -2
 
-        if "干燥" in humi_status:
-            need_humi_tip = True
-        elif "闷热" in humi_status or "潮湿" in humi_status:
-            need_humi_tip = True
+        if any(s in ['较干', '干燥'] for s in  humi_status):
+            humi_tip_level = 1
+        elif any(s in ['较湿', '潮湿'] for s in  humi_status):
+            humi_tip_level = 2
 
         # 播报温度
-        if need_temp_tip:
-            if "寒冷" in temp_status or "偏冷" in temp_status:
+        if temp_tip_level != 0:
+            if temp_tip_level < 0:
                 voice_text += f"当前温度{int(temp)}度，请注意保暖。"
             else:
                 voice_text += f"当前温度{int(temp)}度，请注意降温。"
 
         # 播报湿度
-        if need_humi_tip:
-            if "干燥" in humi_status:
+        if humi_tip_level:
+            if humi_tip_level == 1:
                 voice_text += f"当前湿度{int(humi)}%，请注意补水。"
             else:
                 voice_text += f"当前湿度{int(humi)}%，请注意防潮。"
@@ -639,6 +648,79 @@ def is_environment_warning():
     return False, None
 
 
+def _check_and_handle_sport_environment():
+    """检查运动环境条件并处理（用户规则）- 非阻塞方式"""
+    global last_temp, last_humi, current_mode, env_auto_exit_start_time
+
+    # 如果已经在倒计时中，不再重复触发
+    if env_auto_exit_start_time is not None:
+        return
+
+    temp = last_temp
+    humi = last_humi
+
+    # 严重级别警报
+    severe_temp = ["严寒", "炎热"]  # temp < 0 或 temp > 30
+    severe_humi = ["干燥", "潮湿"]  # humi < 30 或 humi > 80
+
+    # 一般级别警报
+    general_temp = ["偏冷", "偏热"]  # 10 <= temp < 18 或 25 < temp <= 30
+    general_humi = ["较干", "较湿", "闷热"]  # 各种湿度问题
+
+    # 获取当前状态
+    env_status, _ = get_environment_status()
+
+    # 判断严重级别
+    has_severe = any(s in severe_temp for s in env_status) or any(s in severe_humi for s in env_status)
+
+    # 判断一般级别
+    has_general = any(s in general_temp for s in env_status) or any(s in general_humi for s in env_status)
+
+    # 适宜（无警报）
+    is_ideal = len(env_status) == 0
+
+    if is_ideal:
+        # 适宜：当前环境状态适宜，运动条件良好
+        add_voice("当前环境状态适宜，运动条件良好")
+    elif has_severe:
+        # 严重级别：生成播报文本并设置15秒倒计时
+        voice_text = ""
+        if temp < 0:
+            voice_text += f"当前严寒，气温{int(temp)}度，"
+        elif temp > 30:
+            voice_text += f"当前炎热，气温{int(temp)}度，"
+
+        if humi < 30:
+            voice_text += f"当前干燥，湿度{int(humi)}%，"
+        elif humi > 80:
+            voice_text += f"当前潮湿，湿度{int(humi)}%，"
+
+        voice_text += "运动条件恶劣，不建议继续运动，即将在5秒后退出运动模式，长按取消退出"
+        add_voice(voice_text)
+
+        # 设置15秒倒计时（非阻塞）
+        env_auto_exit_start_time = time.time()
+    elif has_general:
+        # 一般级别：播报具体问题 + 不建议长时间运动
+        voice_text = ""
+        if "偏冷" in env_status or "偏热" in env_status:
+            if "偏冷" in env_status:
+                voice_text += f"当前温度{int(temp)}度，偏冷，"
+            if "偏热" in env_status:
+                voice_text += f"当前温度{int(temp)}度，偏热，"
+
+        if "较干" in env_status or "较湿" in env_status or "闷热" in env_status:
+            if "较干" in env_status:
+                voice_text += f"当前湿度{int(humi)}%，较干，"
+            if "较湿" in env_status:
+                voice_text += f"当前湿度{int(humi)}%，较湿，"
+            if "闷热" in env_status:
+                voice_text += f"当前环境闷热，"
+
+        voice_text += "不建议长时间运动"
+        add_voice(voice_text)
+
+
 # ==================== 状态播报 ====================
 def report_life_mode_status():
     """生活模式双击播报"""
@@ -656,7 +738,7 @@ def report_life_mode_status():
 
     # 当前时间（口语化）
     now = datetime.now()
-    time_str = f"{now.hour}时{now.minute}分{now.second}秒"
+    time_str = f"{now.hour}时{now.minute}分"
     add_voice(f"当前时间{time_str}")
 
 
@@ -793,18 +875,14 @@ def exit_message_scroll():
 
     time.sleep(0.5)
 
-    if gui:
-        gui.clear()
-        update_ui_mode()
-
-        if current_mode == MODE_MEETING:
-            enter_meeting_mode()
+    # 恢复UI显示
+    update_ui_mode()
 
 
 # ==================== 语音合成 ====================
 def add_voice(text):
     """添加语音到队列"""
-    if voice_enabled and current_mode != MODE_MEETING:
+    if voice_enabled:
         voice_queue.append(text)
         logger.info(f"语音播报: {text}")
 
@@ -822,12 +900,14 @@ def stop_all_voice():
 def voice_thread():
     """语音播报线程"""
     while running:
-        if voice_queue and voice_enabled and current_mode != MODE_MEETING:
+        if voice_queue and voice_enabled and current_mode:
             text = voice_queue.pop(0)
             try:
                 if tts:
                     tts.speak(text)
-                    time.sleep(0.5)
+                    time.sleep(0.2)
+                else:
+                    logger.warning(f"[语音] tts对象为空，无法播放: {text}")
             except Exception as e:
                 logger.error(f"语音播放错误: {e}")
         time.sleep(0.1)
@@ -880,7 +960,7 @@ def clear_all_led():
 
 def led_breathe(indices, r, g, b, fade_in=True, duration=0.5):
     """LED渐变效果（非阻塞）"""
-    steps = 10  # 减少步数让闪烁更快
+    steps = 15  # 减少步数让闪烁更快
     interval = duration / steps
 
     for i in range(steps + 1):
@@ -919,7 +999,7 @@ def led_breathing_thread():
     color = (255, 255, 0)  # 黄色
 
     # 渐亮和渐灭时间相同（0.5秒），交替闪烁不同时亮起
-    fade_duration = 0.2
+    fade_duration = 0.3
 
     while led_sport_running and running:
         # 检查是否退出运动模式或进入紧急模式
@@ -1239,13 +1319,23 @@ def update_sport_time():
 
 def record_sport_session():
     """记录运动会话"""
-    global sport_duration
+    global sport_duration, sport_pace_total_distance, sport_pace_total_time
 
     if sport_duration > 30:
         try:
-            pace = calculate_pace()
+            # 计算平均配速：总距离/总时间
+            if sport_pace_total_time > 0 and sport_pace_total_distance > 0:
+                # 配速 = 时间(分钟) / 距离(公里)
+                pace_min_per_km = (sport_pace_total_time / 60) / sport_pace_total_distance
+                if 3 <= pace_min_per_km <= 30:
+                    pace = f"{int(pace_min_per_km)}'{int((pace_min_per_km - int(pace_min_per_km)) * 60):02d}\""
+                else:
+                    pace = "--'--\""
+            else:
+                pace = "--'--\""
+
             # calculate_step_and_carbon returns dict but we use global step_count/carbon_reduce_count
-            calculate_step_and_carbon()
+            calculate_step_and_carbon(step_count)
             record = {
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "mode": "运动" if current_mode == MODE_SPORT else "会议",
@@ -1261,6 +1351,10 @@ def record_sport_session():
                     logger.info(f"运动记录已上传: {record}")
             except Exception as upload_err:
                 logger.warning(f"运动记录上传失败: {upload_err}")
+                # 上传失败，保存到本地pending_data
+                offline_manager.pending_data.append(record)
+                offline_manager._save_pending()
+                logger.info(f"运动记录已保存到本地: {record}")
         except Exception as e:
             logger.error(f"记录运动失败: {e}")
     sport_duration = 0
@@ -1323,7 +1417,8 @@ def sport_idle_monitor():
 
             if idle_time > 60 and not exit_sport_countdown:
                 exit_sport_countdown = True
-                add_voice("检测到您已静止一分钟，是否退出运动模式？请长按按钮取消")
+                stop_all_voice()
+                add_voice("检测到您已静止一分钟，是否退出运动模式？请长按取消")
 
                 countdown_start = time.time()
                 while running and exit_sport_countdown:
@@ -1344,23 +1439,20 @@ def enter_meeting_mode():
 
     logger.info("进入会议模式，显示黑屏")
 
-    # 清空所有UI元素
-    for key in list(ui_elements.keys()):
-        try:
-            ui_elements[key].remove()
-        except:
-            pass
+    # 不再立即清除语音，让切换模式的语音能播放完
 
-    # 直接清空就是黑色
-    if gui:
-        gui.clear()
+    # 隐藏所有UI元素
+    hide_all_ui()
+
+    # 显示会议模式黑色背景
+    if 'meeting_black' in ui_elements:
+        ui_elements['meeting_black'].config(state='normal')
 
     set_led_color(0, 0, 0)
 
 
 def exit_meeting_mode():
     """退出会议模式"""
-    global meeting_black_rect
 
     logger.info("退出会议模式，恢复显示")
 
@@ -1421,34 +1513,64 @@ def handle_life_mode():
     # 坐姿提醒播报
     if sitting_duration > 0 and sitting_duration >= sitting_remind_duration:
         if sitting_duration % sitting_remind_duration < 2:
+            stop_all_voice()
             add_voice("您已经坐了很久，请站起来活动一下")
 
-    # 更新环境状态显示（支持两个状态）
+    # 更新环境状态显示（多状态用空格分开）
     env_status, _ = get_environment_status()
+    # 用空格合并多个状态
+    status_text = ' '.join(env_status)
     if 'env_status' in ui_elements:
         if env_status:
-            # 多个状态时分散显示
-            if len(env_status) == 1:
-                ui_elements['env_status'].config(text=env_status[0], x=163, y=139)
-                if 'env_status_2' in ui_elements:
-                    ui_elements['env_status_2'].config(text="")
-            else:
-                # 第一个状态在上方，第二个状态在下方
-                ui_elements['env_status'].config(text=env_status[0], x=163, y=139)
-                if 'env_status_2' in ui_elements:
-                    ui_elements['env_status_2'].config(text=env_status[1], x=163, y=165)
+            ui_elements['env_status'].config(text=status_text)
         else:
-            ui_elements['env_status'].config(text="适宜", x=163, y=139)
-            if 'env_status_2' in ui_elements:
-                ui_elements['env_status_2'].config(text="")
+            ui_elements['env_status'].config(text=status_text, x=175, y=115, origin='center')
 
     update_activity_hours()
+
+
+def gnss_search_thread_func():
+    """GNSS搜星线程（30秒搜星）"""
+    global gnss_valid, gnss_searching
+
+    if not GNSS_AVAILABLE:
+        return
+
+    gnss_searching = True
+    gnss_search_start = time.time()
+    logger.info("开始30秒GNSS搜星...")
+
+    while running and gnss_searching and current_mode == MODE_SPORT:
+        elapsed = time.time() - gnss_search_start
+        if elapsed >= 30:
+            # 30秒搜星失败
+            logger.info("GNSS搜星超时（30秒），卫星信号弱")
+            add_voice("您当前可能处于室内，卫星信号弱，卫星定位暂不可用")
+            gnss_searching = False
+            break
+
+        sat_count = gnss_manager.get_satellite_count()
+        logger.info(f"GNSS搜星中: {sat_count}颗")
+
+        if sat_count > 4:
+            gnss_valid = True
+            gnss_searching = False
+            logger.info(f"GNSS搜星成功: {sat_count}颗")
+            break
+
+        # 每秒检查一次
+        time.sleep(1)
+
+    gnss_searching = False
 
 
 def handle_sport_mode():
     """运动模式"""
     global fall_detected, emergency_mode, step_count, carbon_reduce_count, current_pace_str
     global gps_speed_read_time, gps_current_speed, step_pace_start_time, step_pace_last_step
+    global gnss_searching, gnss_search_thread
+    global last_valid_pace_str, has_valid_pace
+    global sport_pace_total_distance, sport_pace_total_time, sport_pace_start_time
 
     if message_showing:
         return
@@ -1456,6 +1578,12 @@ def handle_sport_mode():
     # 启动GNSS（用于速度获取）
     if not gnss_manager.is_active:
         gnss_manager.start()
+
+    # 启动30秒搜星线程（如果不正在搜星）
+    if not gnss_searching:
+        gnss_searching = True
+        gnss_search_thread = threading.Thread(target=gnss_search_thread_func, daemon=True)
+        gnss_search_thread.start()
 
     # 启动呼吸灯
     start_led_breathing()
@@ -1493,60 +1621,117 @@ def handle_sport_mode():
     except Exception as e:
         logger.error(f"运动模式数据记录错误: {e}")
 
-    # === 配速计算（GPS优先，步数备用）===
+    # === 配速计算（GNSS优先，步数备用）===
     current_time = time.time()
+    PACE_MIN_DISTANCE = 0.0625  # 最小有效距离(km)，对应配速8'00"/km
 
-    # 尝试读取GPS速度（每30秒）
-    if gps_speed_read_time is None:
-        gps_speed_read_time = current_time
+    # GNSS有效时，每10秒读取速度并计算配速
+    if gnss_valid:
+        if gps_speed_read_time is None:
+            gps_speed_read_time = current_time
 
-    elapsed = current_time - gps_speed_read_time
-    if elapsed >= 30:
-        gps_current_speed = gnss_manager.get_speed()  # km/h
-        gps_speed_read_time = current_time
-        logger.info(f"GPS速度读取: {gps_current_speed} km/h")
+        elapsed = current_time - gps_speed_read_time
+        if elapsed >= 10:
+            gps_current_speed = gnss_manager.get_speed()  # km/h
+            gps_speed_read_time = current_time
+            logger.info(f"GNSS速度读取: {gps_current_speed} km/h")
 
-    # 使用GPS速度计算配速
-    if gps_current_speed is not None and gps_current_speed > 0:
-        pace = 60 / gps_current_speed
-        if 3 <= pace <= 30:
-            minutes = int(pace)
-            seconds = int((pace - minutes) * 60)
-            current_pace_str = f"{minutes}'{seconds:02d}\""
-        else:
-            current_pace_str = "--'--\""
-    else:
-        # GPS无效，使用步数计算配速（每30秒）
-        if step_pace_start_time is None:
-            step_pace_start_time = current_time
-            step_pace_last_step = step_count
+            if gps_current_speed is not None and gps_current_speed > 0:
+                pace = 60 / gps_current_speed  # 配速(分钟/公里)
+                # 计算10秒内行驶的距离
+                distance_km = gps_current_speed * (elapsed / 3600)
 
-        step_elapsed = current_time - step_pace_start_time
-        if step_elapsed >= 30:
-            steps_in_30s = step_count - step_pace_last_step
-            if steps_in_30s >= 10:
-                # 计算步频（步/秒）
-                steps_per_second = steps_in_30s / step_elapsed
-                # 根据步频获取对应的步长
-                step_length = get_step_length_by_frequency(steps_per_second)
-                distance_km = steps_in_30s * step_length / 1000
-                duration_min = step_elapsed / 60
-                if distance_km > 0.01 and duration_min > 0:
-                    pace = duration_min / distance_km
-                    if 3 <= pace <= 30:
-                        minutes = int(pace)
-                        seconds = int((pace - minutes) * 60)
-                        current_pace_str = f"{minutes}'{seconds:02d}\""
-                    else:
-                        current_pace_str = "--'--\""
+                # 检查有效值：距离 >= 0.0625km 且配速在3-30之间
+                if distance_km >= PACE_MIN_DISTANCE and 3 <= pace <= 30:
+                    minutes = int(pace)
+                    seconds = int((pace - minutes) * 60)
+                    current_pace_str = f"{minutes}'{seconds:02d}\""
+                    last_valid_pace_str = current_pace_str
+                    has_valid_pace = True
+                    # 累计到平均配速计算
+                    sport_pace_total_distance += distance_km
+                    sport_pace_total_time += elapsed
+                    if sport_pace_start_time is None:
+                        sport_pace_start_time = current_time - elapsed
+                    logger.info(f"GNSS配速有效: {current_pace_str}")
                 else:
-                    current_pace_str = "--'--\""
+                    # 距离无效，使用最近有效值或默认值
+                    current_pace_str = last_valid_pace_str if has_valid_pace else "--'--\""
+                    logger.info(f"GNSS配速无效（距离不足）")
             else:
-                current_pace_str = "--'--\""
-            # 重置计时
-            step_pace_start_time = current_time
+                # GNSS速度无效，使用最近有效值或默认值
+                current_pace_str = last_valid_pace_str if has_valid_pace else "--'--\""
+                logger.info(f"GNSS速度无效")
+    else:
+        # GNSS无效，使用步数计算配速（每30秒）
+        # 逻辑：若总步数为0，不计时；第一次步数增加时开始计时30s；30s内步数为0则停止
+
+        if step_count == 0:
+            # 总步数为0，不计时，显示默认值
+            step_pace_start_time = None
             step_pace_last_step = step_count
-            logger.info(f"步数配速计算: {steps_in_30s}步/{step_elapsed:.0f}秒 = {current_pace_str}")
+            current_pace_str = "--'--\""
+            logger.info(f"步数配速: 步数为0，不计时")
+        else:
+            # 有步数的情况
+            if step_pace_start_time is None:
+                # 尚未开始计时，检查是否有步数增加
+                if step_count > 0:
+                    # 第一次出现步数，开始计时30s
+                    step_pace_start_time = current_time
+                    step_pace_last_step = step_count
+                    logger.info(f"步数配速: 开始30s计时，步数={step_count}")
+            else:
+                # 已在计时中
+                step_elapsed = current_time - step_pace_start_time
+                steps_in_period = step_count - step_pace_last_step
+
+                if step_elapsed >= 30:
+                    # 30秒到，计算配速
+                    if steps_in_period >= 10:
+                        steps_per_second = steps_in_period / step_elapsed
+                        step_length = get_step_length_by_frequency(steps_per_second)
+                        distance_km = steps_in_period * step_length / 1000
+                        duration_min = step_elapsed / 60
+
+                        # 检查有效值：距离 >= 0.0625km 且配速在3-30之间
+                        if distance_km >= PACE_MIN_DISTANCE and 3 <= duration_min / distance_km <= 30:
+                            pace = duration_min / distance_km
+                            minutes = int(pace)
+                            seconds = int((pace - minutes) * 60)
+                            current_pace_str = f"{minutes}'{seconds:02d}\""
+                            last_valid_pace_str = current_pace_str
+                            has_valid_pace = True
+                            # 累计到平均配速计算
+                            sport_pace_total_distance += distance_km
+                            sport_pace_total_time += step_elapsed
+                            if sport_pace_start_time is None:
+                                sport_pace_start_time = step_pace_start_time
+                            logger.info(f"步数配速有效: {current_pace_str}")
+                        else:
+                            # 距离无效，使用最近有效值或默认值
+                            current_pace_str = last_valid_pace_str if has_valid_pace else "--'--\""
+                            logger.info(f"步数配速无效（距离不足）")
+                    else:
+                        # 步数不足10步，使用最近有效值或默认值
+                        current_pace_str = last_valid_pace_str if has_valid_pace else "--'--\""
+                        logger.info(f"步数配速无效（步数不足10步）")
+
+                    # 重置计时
+                    step_pace_start_time = current_time
+                    step_pace_last_step = step_count
+                    logger.info(f"步数配速计算: {steps_in_period}步/{step_elapsed:.0f}秒 = {current_pace_str}")
+                else:
+                    # 30秒未到，检查是否有步数增加（停止条件：30s内步数为0）
+                    if steps_in_period == 0:
+                        # 30s内步数为0，停止计时，显示最近有效值
+                        step_pace_start_time = None
+                        step_pace_last_step = step_count
+                        current_pace_str = last_valid_pace_str if has_valid_pace else "--'--\""
+                        logger.info(f"步数配速: 30s内无步数增加，停止计算")
+                    else:
+                        # 仍在计时中，继续显示默认值或最近有效值
+                        current_pace_str = last_valid_pace_str if has_valid_pace else "--'--\""
 
     # 显示配速
     if 'pace_text' in ui_elements:
@@ -1565,14 +1750,15 @@ def handle_sport_mode():
         elif carbon_reduce_count >= 1:
             carbon_str = f"{round(carbon_reduce_count, 2)}g"
         else:
-            carbon_str = f"{int(carbon_reduce_count * 1000)}g"
+            carbon_str = f"{round(carbon_reduce_count, 2)}g"
         ui_elements['carbon_reduce_text'].config(text=carbon_str)
 
     # 跌倒检测
     if detect_fall() and not fall_detected:
         logger.warning("检测到摔倒！")
         fall_detected = True
-        add_voice("检测到摔倒，是否需要帮助？长按按钮取消警报")
+        stop_all_voice()
+        add_voice("检测到摔倒，是否需要帮助？长按取消警报")
         threading.Thread(target=emergency_countdown, daemon=True).start()
 
     update_sport_time()
@@ -1585,7 +1771,7 @@ def handle_meeting_mode():
 
 def emergency_countdown():
     """紧急倒计时"""
-    global emergency_mode, fall_detected, button_press_start
+    global emergency_mode, fall_detected, touch_press_start
 
     logger.info("紧急倒计时开始...")
 
@@ -1596,8 +1782,8 @@ def emergency_countdown():
         logger.info(f"紧急倒计时: {i}秒")
         time.sleep(1)
 
-        if button_press_start is not None:
-            press_duration = time.time() - button_press_start
+        if touch_press_start is not None:
+            press_duration = time.time() - touch_press_start
             if press_duration >= long_press_threshold:
                 fall_detected = False
                 add_voice("紧急警报已取消")
@@ -1612,6 +1798,7 @@ def emergency_countdown():
 def handle_emergency():
     """处理紧急情况（非阻塞LED）"""
     logger.warning("启动紧急求助")
+    stop_all_voice()
     add_voice("紧急求助！紧急求助！需要帮助！")
 
     # 启动SOS闪烁（非阻塞）
@@ -1622,57 +1809,66 @@ def handle_emergency():
         time.sleep(2)  # 语音间隔，不阻塞LED
 
 
-# ==================== 按钮处理 ====================
-last_button_state = 0
-button_press_start = None
+# ==================== 触摸板处理 ====================
+last_touch_state = 0
+touch_press_start = None
 
 
-def button_monitor():
-    """按钮监控线程"""
-    global current_mode, button_press_start, fall_detected, emergency_mode
-    global exit_sport_countdown, last_button_state, message_showing
-    global last_click_time, long_press_2s_voiced
+def touch_monitor():
+    """触摸板监控线程"""
+    global current_mode, touch_press_start, fall_detected, emergency_mode
+    global exit_sport_countdown, last_touch_state, message_showing
+    global last_click_time, long_press_2s_voiced, env_auto_exit_start_time, double_click_last_time
+    global env_exit_cancelled_by_touch
 
     # 长按触发标志，避免重复触发
     long_press_triggered = False
 
     while running:
         try:
-            if button:
-                current_state = button.value()
+            if touch:
+                current_state = touch.value()
             else:
                 time.sleep(0.05)
                 continue
 
             # 按下
-            if current_state == 1 and last_button_state == 0:
-                button_press_start = time.time()
+            if current_state == 1 and last_touch_state == 0:
+                touch_press_start = time.time()
                 long_press_triggered = False
                 long_press_2s_voiced = False  # 重置2秒语音标志
+                # 取消环境自动退出倒计时，并标记被触摸板取消
+                if env_auto_exit_start_time is not None:
+                    env_exit_cancelled_by_touch = True
+                    add_voice("已取消自动退出，将保持在运动模式")
+                env_auto_exit_start_time = None
 
-            # 按钮保持按下状态 - 检测长按
-            elif current_state == 1 and last_button_state == 1:
-                if button_press_start is not None:
-                    press_duration = time.time() - button_press_start
+            # 触摸板保持按下状态 - 检测长按
+            elif current_state == 1 and last_touch_state == 1:
+                if touch_press_start is not None:
+                    press_duration = time.time() - touch_press_start
 
                     # 运动模式：连续长按4秒，中途2秒语音提示
-                    if current_mode == MODE_SPORT and not long_press_triggered:
+                    # 如果存在环境恶劣退出计时、已被触摸板取消、或存在紧急倒计时，则忽略运动模式的长按退出
+                    if current_mode == MODE_SPORT and not long_press_triggered and env_auto_exit_start_time is None and not env_exit_cancelled_by_touch and not emergency_mode:
                         # 达到2秒：播报语音提示
                         if press_duration >= 2.0 and not long_press_2s_voiced:
                             long_press_2s_voiced = True
+                            stop_all_voice()
                             add_voice("即将退出运动模式，继续长按2秒后退出")
                             logger.info("运动模式：长按2秒，语音提示已播报")
 
-                        # 达到4秒：确认退出
-                        if press_duration >= 4.0:
+                        # 达到4秒：确认退出（语音补偿2秒）
+                        if press_duration >= 6.0:
                             long_press_triggered = True
                             old_mode = current_mode
                             change_mode_internal(MODE_LIFE)
                             logger.info(f"模式切换: {MODE_NAMES[old_mode]} → {MODE_NAMES[current_mode]}")
-                            button_press_start = None
+                            touch_press_start = None
 
                     # 其他情况：使用原来的2秒阈值
-                    elif not long_press_triggered and press_duration >= long_press_threshold:
+                    # 如果环境退出已被触摸板取消，则忽略
+                    elif not long_press_triggered and press_duration >= long_press_threshold and not env_exit_cancelled_by_touch:
                         long_press_triggered = True
 
                         # 紧急模式取消
@@ -1681,48 +1877,40 @@ def button_monitor():
                             emergency_mode = False
                             stop_led_breathing()  # 停止SOS灯
                             add_voice("紧急模式已取消")
-                            logger.info("按钮长按取消紧急模式")
+                            logger.info("触摸板长按取消紧急模式")
                             stop_all_voice()
-                            button_press_start = None
+                            touch_press_start = None
 
                         # 消息显示中
                         elif message_showing:
                             exit_message_scroll()
-                            logger.info("按钮长按退出消息显示")
-                            button_press_start = None
+                            logger.info("触摸板长按退出消息显示")
+                            touch_press_start = None
 
-                        # 生活/会议模式：直接切换
+                        # 生活/会议模式：使用config中的MODE_CYCLE切换
                         else:
                             old_mode = current_mode
-                            current_mode = (current_mode + 1) % 4
+                            # 找到当前模式在MODE_CYCLE中的索引
+                            try:
+                                current_idx = config.MODE_CYCLE.index(current_mode)
+                                next_idx = (current_idx + 1) % len(config.MODE_CYCLE)
+                                new_mode = config.MODE_CYCLE[next_idx]
+                            except ValueError:
+                                # 如果当前模式不在列表中，默认切换到下一个
+                                new_mode = config.MODE_CYCLE[1] if current_mode == config.MODE_CYCLE[0] else config.MODE_CYCLE[0]
+
+                            # 使用change_mode_internal处理模式切换（会播报语音）
+                            change_mode_internal(new_mode)
                             logger.info(f"模式切换: {MODE_NAMES[old_mode]} → {MODE_NAMES[current_mode]}")
-
-                            if old_mode == MODE_MEETING:
-                                exit_meeting_mode()
-
-                            stop_all_voice()
-                            update_ui_mode()
-
-                            if current_mode == MODE_MEETING:
-                                enter_meeting_mode()
-                            elif current_mode == MODE_SPORT:
-                                # 运动模式环境检查
-                                try:
-                                    if dht11:
-                                        temp = round(dht11.temp_c() * 0.8, 1)
-                                        if temp is not None:
-                                            if temp < 10:
-                                                add_voice(f"当前温度{int(temp)}度，较冷，请注意保暖")
-                                            elif temp > 30:
-                                                add_voice(f"当前温度{int(temp)}度，较热，请注意补水")
-                                except:
-                                    pass
-                            button_press_start = None
+                            touch_press_start = None
 
             # 释放
-            elif current_state == 0 and last_button_state == 1:
-                if button_press_start is not None:
-                    press_duration = time.time() - button_press_start
+            elif current_state == 0 and last_touch_state == 1:
+                # 重置环境退出取消标志
+                env_exit_cancelled_by_touch = False
+
+                if touch_press_start is not None:
+                    press_duration = time.time() - touch_press_start
                     current_time = time.time()
 
                     # 如果之前没有触发长按，作为短按处理
@@ -1731,8 +1919,11 @@ def button_monitor():
                         if fall_detected or emergency_mode or message_showing:
                             pass
                         else:
-                            # 双击检测
-                            if last_click_time is not None:
+                            # 双击检测（带冷却时间）
+                            if current_time - double_click_last_time < double_click_cooldown:
+                                # 在冷却时间内，作为新的单击
+                                last_click_time = current_time
+                            elif last_click_time is not None:
                                 click_interval = current_time - last_click_time
                                 if click_interval <= double_click_interval:
                                     # 双击触发播报
@@ -1740,6 +1931,7 @@ def button_monitor():
                                         report_life_mode_status()
                                     elif current_mode == MODE_SPORT:
                                         report_sport_mode_status()
+                                    double_click_last_time = current_time  # 更新冷却时间
                                     last_click_time = None  # 重置，避免三次点击触发多次
                                 else:
                                     # 超过间隔，作为新的单击
@@ -1749,12 +1941,12 @@ def button_monitor():
                                 last_click_time = current_time
 
 
-                    button_press_start = None
+                    touch_press_start = None
 
-            last_button_state = current_state
+            last_touch_state = current_state
 
         except Exception as e:
-            logger.error(f"按钮监控错误: {e}")
+            logger.error(f"触摸板监控错误: {e}")
 
         time.sleep(0.05)
 
@@ -1966,7 +2158,7 @@ def send_status():
                 "brightness": led_brightness,
                 "posture": current_posture,
                 "pace": 0,
-                "pace_str": calculate_pace() if current_mode == MODE_SPORT else "--'--\"",
+                "pace_str": current_pace_str if current_mode == MODE_SPORT else "--'--\"",
                 "step": step_count,
                 "carbon_reduce": carbon_reduce_count,
                 "emergency": emergency_mode,
@@ -2017,6 +2209,7 @@ def change_mode_internal(new_mode):
     """内部模式切换"""
     global current_mode, current_pace_str
     global gps_speed_read_time, gps_current_speed, step_pace_start_time, step_pace_last_step
+    global gnss_searching
 
     if message_showing:
         return
@@ -2028,10 +2221,19 @@ def change_mode_internal(new_mode):
             record_sport_session()
         # 重置配速显示和计时器
         current_pace_str = "--'--\""
+        last_valid_pace_str = "--'--\""
+        has_valid_pace = False
+        sport_pace_total_distance = 0.0
+        sport_pace_total_time = 0.0
+        sport_pace_start_time = None
         gps_speed_read_time = None
         gps_current_speed = None
         step_pace_start_time = None
         step_pace_last_step = 0
+        step_pace_accumulated_distance = 0.0
+        step_pace_accumulated_time = 0.0
+        # 停止搜星
+        gnss_searching = False
         # 停止GNSS和呼吸灯
         gnss_manager.stop()
         stop_led_breathing()
@@ -2039,14 +2241,30 @@ def change_mode_internal(new_mode):
     if old_mode == MODE_MEETING:
         exit_meeting_mode()
 
-    stop_all_voice()
     current_mode = new_mode
 
+    # 先清空语音队列
+    stop_all_voice()
+    time.sleep(0.1)
+
+    # 切换到新模式后再播报语音
+    logger.debug(f"[模式切换] 准备切换到新模式: {new_mode}, MODE_NAMES={MODE_NAMES[current_mode]}")
     add_voice(f"切换到{MODE_NAMES[current_mode]}")
-    update_ui_mode()
+    logger.debug(f"[模式切换] add_voice已调用, voice_queue={voice_queue}")
 
     if current_mode == MODE_MEETING:
+        logger.debug(f"[模式切换] 进入会议模式，准备等待1.5秒")
+        time.sleep(1.5)  # 等待语音播放完再进入会议模式
         enter_meeting_mode()
+        logger.debug(f"[模式切换] enter_meeting_mode已调用")
+    elif current_mode == MODE_SPORT:
+        time.sleep(0.5)
+        update_ui_mode()
+        # 运动模式环境检查
+        _check_and_handle_sport_environment()
+    else:
+        time.sleep(0.5)
+        update_ui_mode()
 
 
 def handle_command(cmd):
@@ -2201,27 +2419,75 @@ class GNSSManager:
             pass
         return None
 
+    def get_satellite_count(self):
+        """获取使用的卫星数量，无效返回0"""
+        if not self.is_active or not self.gnss:
+            return 0
+
+        try:
+            num = self.gnss.get_num_sta_used()
+            return num if num is not None else 0
+        except:
+            return 0
+
+    def get_datetime(self):
+        """获取GNSS时间，返回datetime对象或None"""
+        if not self.is_active or not self.gnss:
+            return None
+
+        try:
+            gnss_utc = self.gnss.get_date()
+            gnss_time = self.gnss.get_utc()
+            if gnss_utc and gnss_time:
+                from datetime import datetime
+                return datetime(
+                    gnss_utc.year, gnss_utc.month, gnss_utc.date,
+                    gnss_time.hour, gnss_time.minute, gnss_time.second
+                )
+        except:
+            pass
+        return None
+
 
 gnss_manager = GNSSManager()
 
 
 # 主循环采样统计计数器
 _sample_stats_counter = 0
+_gnss_check_counter = 0  # GNSS检查计数器（每0.1秒递增，200次=20秒）
 
 
 # ==================== 主循环 ====================
 def main_loop():
     """主循环"""
-    global _sample_stats_counter
+    global _sample_stats_counter, _gnss_check_counter, gnss_valid
 
     while running:
         try:
+            # 非运动模式（除会议模式外）每20秒检查一次GNSS卫星数量
+            if current_mode != MODE_SPORT and current_mode != MODE_MEETING:
+                _gnss_check_counter += 1
+                if _gnss_check_counter >= 200:  # 0.1s * 200 = 20秒
+                    _gnss_check_counter = 0
+                    if GNSS_AVAILABLE:
+                        sat_count = gnss_manager.get_satellite_count()
+                        gnss_valid = sat_count > 4
+                        logger.info(f"GNSS卫星检查: {sat_count}颗, 有效: {gnss_valid}")
+
             # 会议模式不显示任何内容
             if not message_showing:
                 if current_mode != MODE_MEETING and gui:
-                    # 更新时间
+                    # 更新时间（优先使用GNSS时间）
                     if 'time_text' in ui_elements:
-                        ui_elements['time_text'].config(text=datetime.now().strftime('%H:%M:%S'))
+                        if gnss_valid:
+                            gnss_dt = gnss_manager.get_datetime()
+                            if gnss_dt:
+                                time_str = gnss_dt.strftime('%H:%M:%S')
+                            else:
+                                time_str = datetime.now().strftime('%H:%M:%S')
+                        else:
+                            time_str = datetime.now().strftime('%H:%M:%S')
+                        ui_elements['time_text'].config(text=time_str)
 
             # 每5秒输出一次采样统计
             _sample_stats_counter += 1
@@ -2235,6 +2501,17 @@ def main_loop():
                               f", 总采样: {stats['sample_count']}")
                     except Exception:
                         pass
+
+            # 检查环境自动退出倒计时
+            global env_auto_exit_start_time
+            if env_auto_exit_start_time is not None:
+                elapsed = time.time() - env_auto_exit_start_time
+                if elapsed >= 15:
+                    # 15秒后自动退出
+                    env_auto_exit_start_time = None
+                    if current_mode == MODE_SPORT:
+                        change_mode_internal(MODE_LIFE)
+                        add_voice("已自动退出运动模式")
 
             if not emergency_mode:
                 if current_mode == MODE_LIFE:
@@ -2266,8 +2543,8 @@ if __name__ == "__main__":
 
         dht11 = DHT11(Pin(PIN_DHT11))
         logger.info("DHT11初始化成功")
-        button = Pin(PIN_BUTTON, Pin.IN)
-        logger.info("按钮初始化成功")
+        touch = Pin(PIN_TOUCH, Pin.IN)
+        logger.info("触摸板初始化成功")
         knob = Pin(PIN_KNOB, Pin.ANALOG)
         logger.info("旋钮初始化成功")
         led_strip = NeoPixel(Pin(PIN_LED), LED_COUNT)
@@ -2277,7 +2554,7 @@ if __name__ == "__main__":
         tts = DFRobot_SpeechSynthesis_I2C()
         tts.begin(tts.V2)
         tts.set_voice(9)
-        tts.set_speed(5)
+        tts.set_speed(8)
         tts.set_tone(5)
         tts.set_sound_type(tts.FEMALE2)
 
@@ -2296,7 +2573,7 @@ if __name__ == "__main__":
         threads = [
             threading.Thread(target=voice_thread, daemon=True, name="voice"),
             threading.Thread(target=knob_thread, daemon=True, name="knob"),
-            threading.Thread(target=button_monitor, daemon=True, name="button"),
+            threading.Thread(target=touch_monitor, daemon=True, name="touch"),
             threading.Thread(target=main_loop, daemon=True, name="main"),
             threading.Thread(target=communication_thread, daemon=True, name="comm"),
             threading.Thread(target=reset_daily_stats, daemon=True, name="reset"),

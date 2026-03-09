@@ -37,8 +37,10 @@ ENV/
 debug_data/
 *.csv
 
-# 服务器数据
+# 数据文件
 server/data/
+client/data/
+data/
 *.json
 
 # 日志

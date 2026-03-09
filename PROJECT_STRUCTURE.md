@@ -10,14 +10,19 @@ smart-sports-anklet/
 ├── client/                      # 客户端程序（行空板端）
 │   ├── main.py                 # 主程序入口
 │   ├── config.py               # 客户端配置
-│   ├── debug_analyzer.py       # 调试数据分析工具
 │   ├── sensors/                # 传感器模块
 │   │   ├── __init__.py
-│   │   ├── icm20689.py        # ICM20689加速度传感器直接读取（50Hz）
+│   │   ├── icm20689.py        # ICM20689加速度传感器读取（50Hz）
 │   │   ├── attitude.py         # 姿态角计算器
 │   │   ├── step_detector.py   # 步数检测器
 │   │   ├── posture_detector.py# 坐姿检测器
-│   │   └── fall_detector.py   # 跌倒检测器
+│   │   ├── fall_detector.py   # 跌倒检测器
+│   │   └── gravity_remover.py # 重力去除
+│   ├── tools/                  # 数据分析工具
+│   │   ├── data_analyzer.py
+│   │   ├── data_collector.py
+│   │   ├── data_plotter.py
+│   │   └── step_counter.py
 │   └── utils/                  # 工具模块
 │       ├── __init__.py
 │       ├── debug.py            # 调试日志
@@ -28,7 +33,8 @@ smart-sports-anklet/
 │   ├── control.html            # Web控制界面
 │   └── data/                   # 数据存储目录（运行时创建）
 │
-├── docs/                      # 文档和参考资料
+├── docs/                       # 文档和参考资料
+│   └── 论文/                   # 参考文献
 │
 ├── start_server.bat           # Windows服务器启动脚本
 ├── start_server.sh            # Linux服务器启动脚本
@@ -36,7 +42,7 @@ smart-sports-anklet/
 ├── requirements.txt           # Python依赖
 ├── LICENSE                   # MIT开源许可证
 ├── README.md                 # 项目主文档
-├── QUICKSTART.md             # 快速开始指南
+├── QUICKSTART.md            # 快速开始指南
 └── PROJECT_STRUCTURE.md      # 本文档
 ```
 
@@ -50,12 +56,12 @@ smart-sports-anklet/
 |------|---------|
 | main.py | 主程序入口，处理3种模式（生活/运动/会议） |
 | config.py | 客户端配置参数 |
-| debug_analyzer.py | 调试数据分析工具 |
-| sensors/icm20689.py | 直接读取/dev/icm20689，实现50Hz高频采样 |
-| sensors/step_detector.py | 基于论文的步数检测算法 |
-| sensors/posture_detector.py | Y轴分量法+Roll角坐姿检测 |
-| sensors/fall_detector.py | 多特征融合跌倒检测 |
+| sensors/icm20689.py | 直接读取ICM20689，实现50Hz高频采样 |
+| sensors/step_detector.py | 基于多阈值算法的步数检测 |
+| sensors/posture_detector.py | 基于Y轴分量和Roll角的坐姿检测 |
+| sensors/fall_detector.py | 基于多特征融合的跌倒检测 |
 | sensors/attitude.py | 姿态角计算（俯仰角/翻滚角） |
+| sensors/gravity_remover.py | 基于低通滤波的重力去除 |
 | utils/debug.py | 调试数据记录器 |
 | utils/helpers.py | 配速计算等辅助函数 |
 
@@ -103,8 +109,8 @@ SERVER_URL = "http://your-server-ip:5000"
 
 # 硬件引脚
 PIN_DHT11 = "P22"      # 温湿度传感器
-PIN_BUTTON = "P24"      # 按钮
-PIN_KNOB = "P23"        # 旋钮
+PIN_TOUCH = "P24"      # 按钮
+PIN_KNOB = "P23"       # 旋钮
 PIN_LED = "P21"         # LED灯带
 
 # 模式定义

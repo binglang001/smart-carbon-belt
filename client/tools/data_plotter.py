@@ -16,9 +16,18 @@ import platform
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 导入配置文件
+import config
+
 # 导入日志模块
 from utils.logger import get_logger
 logger = get_logger('tools.data_plotter')
+
+# 导入重力去除器
+from sensors.gravity_remover import GravityRemover
+
+# 从配置文件读取默认参数
+DEFAULT_WINDOW_SIZE = config.STEP_CONFIG.get("window_size", 7)
 
 # 配置matplotlib中文字体
 def setup_chinese_font():
@@ -45,7 +54,7 @@ def setup_chinese_font():
 
 
 def load_data(csv_file):
-    """加载CSV数据"""
+    """加载CSV数据（包括原始加速度，用于重力去除）"""
     data = []
     with open(csv_file, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -53,69 +62,99 @@ def load_data(csv_file):
             data.append({
                 'timestamp': float(row['timestamp']),
                 'sample_idx': int(row['sample_idx']),
+                'acc_x': float(row['acc_x']),
+                'acc_y': float(row['acc_y']),
+                'acc_z': float(row['acc_z']),
                 'acc_magnitude': float(row['acc_magnitude']),
-                'linear_y': float(row['linear_y']),
             })
     return data
 
 
-def find_peaks(data, threshold, window_size=7):
-    """找波峰 - 论文1: C[0-6] > T_max 且 C[3]最大"""
+def preprocess_data(data):
+    """使用重力去除器处理原始加速度数据"""
+    # 从配置文件读取重力去除参数
+    gravity_config = config.GRAVITY_REMOVER_CONFIG
+    filter_alpha = gravity_config.get("filter_alpha", 0.3)
+    filter_window = gravity_config.get("filter_window", 5)
+
+    remover = GravityRemover({
+        "filter_alpha": filter_alpha,
+        "filter_window": filter_window
+    })
+
+    processed = []
+    for sample in data:
+        linear_x, linear_y, linear_z = remover.add_sample(
+            sample['acc_x'], sample['acc_y'], sample['acc_z'],
+            timestamp=sample['timestamp']
+        )
+        processed.append({
+            'timestamp': sample['timestamp'],
+            'sample_idx': sample['sample_idx'],
+            'acc_magnitude': sample['acc_magnitude'],
+            'linear_y': linear_y,
+        })
+
+    logger.info(f"重力去除参数: alpha={filter_alpha}, window={filter_window}")
+    return processed
+
+
+def find_three_stage_features(data, t_max, t_min, window_size=None):
+    """
+    三阶段特征检测 - 完全基于论文算法
+
+    阶段1 (Flag=1): 波峰阈值检测 - 所有窗口点 > T_max 且 中间点最大
+    阶段2 (Flag=2): 过零点检测 - C[2] > 0 且 C[3] < 0
+    阶段3 (Flag=3): 波谷阈值检测 - 所有窗口点 < T_min 且 中间点最小
+    """
+    if window_size is None:
+        window_size = DEFAULT_WINDOW_SIZE
     mid_idx = window_size // 2
-    peaks = []
 
     linear_mag = [d['linear_y'] for d in data]
+    timestamps = [d['timestamp'] for d in data]
 
-    for i in range(window_size - 1, len(linear_mag) - window_size + 1):
-        window = linear_mag[i-mid_idx:i+mid_idx+1]
-        mid_val = window[mid_idx]
+    peaks = []       # Flag=1 候选点
+    zero_crossings = []  # Flag=2 候选点
+    valleys = []     # Flag=3 候选点
 
-        all_above = all(v > threshold for v in window)
-        mid_is_max = all(mid_val >= v for j, v in enumerate(window) if j != mid_idx)
-
-        if all_above and mid_is_max:
-            peaks.append(i)
-
-    return peaks
-
-
-def find_valleys(data, threshold, window_size=7):
-    """找波谷 - 论文1: C[0-6] < T_min 且 C[3]最小"""
-    mid_idx = window_size // 2
-    valleys = []
-
-    linear_mag = [d['linear_y'] for d in data]
-
-    for i in range(window_size - 1, len(linear_mag) - window_size + 1):
-        window = linear_mag[i-mid_idx:i+mid_idx+1]
-        mid_val = window[mid_idx]
-
-        all_below = all(v < threshold for v in window)
-        mid_is_min = all(mid_val <= v for j, v in enumerate(window) if j != mid_idx)
-
-        if all_below and mid_is_min:
-            valleys.append(i)
-
-    return valleys
-
-
-def find_zero_crossings(data):
-    """找过零点 - 论文1: C[3] < 0 且 C[2] > 0"""
-    linear_mag = [d['linear_y'] for d in data]
-    crossings = []
-
-    window_size = 7
-    mid_idx = 3
+    # 用于记录某个波峰索引后面紧跟的过零点
+    peak_to_zero = {}  # {波峰索引: [过零点索引列表]}
 
     for i in range(window_size - 1, len(linear_mag) - window_size + 1):
         window = linear_mag[i-mid_idx:i+mid_idx+1]
         mid_val = window[mid_idx]
         c2_val = window[mid_idx - 1]
 
-        if c2_val > 0 and mid_val < 0:
-            crossings.append(i)
+        # === Flag=1: 波峰检测 ===
+        all_above = all(v > t_max for v in window)
+        mid_is_max = all(mid_val >= v for j, v in enumerate(window) if j != mid_idx)
+        if all_above and mid_is_max:
+            peaks.append(i)
 
-    return crossings
+        # === Flag=2: 过零点检测 (要求在波峰之后) ===
+        if c2_val > 0 and mid_val < 0:
+            # 找最近的波峰
+            for p in reversed(peaks):
+                if p < i:
+                    if p not in peak_to_zero:
+                        peak_to_zero[p] = []
+                    peak_to_zero[p].append(i)
+                    break
+            zero_crossings.append(i)
+
+        # === Flag=3: 波谷检测 (要求在过零点之后) ===
+        all_below = all(v < t_min for v in window)
+        mid_is_min = all(mid_val <= v for j, v in enumerate(window) if j != mid_idx)
+        if all_below and mid_is_min:
+            valleys.append(i)
+
+    return {
+        'peaks': peaks,
+        'zero_crossings': zero_crossings,
+        'valleys': valleys,
+        'peak_to_zero': peak_to_zero
+    }
 
 
 def plot_with_matplotlib(data, output_dir=None, t_max=1.0, t_min=-0.5):
@@ -132,10 +171,11 @@ def plot_with_matplotlib(data, output_dir=None, t_max=1.0, t_min=-0.5):
     acc_mag = [d['acc_magnitude'] for d in data]
     linear_mag = [d['linear_y'] for d in data]
 
-    # 找特征点
-    peaks = find_peaks(data, t_max)
-    valleys = find_valleys(data, t_min)
-    zero_crossings = find_zero_crossings(data)
+    # 使用三阶段检测
+    features = find_three_stage_features(data, t_max, t_min)
+    peaks = features['peaks']
+    valleys = features['valleys']
+    zero_crossings = features['zero_crossings']
 
     # 创建输出目录
     if output_dir is None:
@@ -201,10 +241,12 @@ def plot_with_matplotlib(data, output_dir=None, t_max=1.0, t_min=-0.5):
 
 
 def plot_with_text(data, t_max=1.0, t_min=-0.5):
-    """纯文本绘图"""
-    peaks = find_peaks(data, t_max)
-    valleys = find_valleys(data, t_min)
-    zero_crossings = find_zero_crossings(data)
+    """纯文本绘图 - 使用三阶段检测"""
+    features = find_three_stage_features(data, t_max, t_min)
+    peaks = features['peaks']
+    valleys = features['valleys']
+    zero_crossings = features['zero_crossings']
+    peak_to_zero = features['peak_to_zero']
 
     # 计算数据统计
     acc_mags = [d['acc_magnitude'] for d in data]
@@ -219,19 +261,32 @@ def plot_with_text(data, t_max=1.0, t_min=-0.5):
     max_linear = max(linear_ys) if linear_ys else 0
     min_linear = min(linear_ys) if linear_ys else 0
 
-    # 检查linear_y和acc_y是否相同
-    diff_count = sum(1 for i in range(len(data)) if abs(data[i]['linear_y'] - data[i]['acc_y']) > 0.001)
+    # 统计完整三阶段的步数
+    valid_steps = 0
+    for valley_idx in valleys:
+        # 找这个波谷之前的过零点
+        for zc_idx in reversed(zero_crossings):
+            if zc_idx < valley_idx:
+                # 找这个过零点之前的波峰
+                for peak_idx in reversed(peaks):
+                    if peak_idx < zc_idx:
+                        valid_steps += 1
+                        break
+                break
 
     logger.info("\n" + "=" * 50)
-    logger.info("数据概览")
+    logger.info("三阶段检测结果（基于论文算法）")
     logger.info("=" * 50)
     logger.info(f"样本数: {len(data)}")
     logger.info(f"原始加速度 - 均值: {avg_acc:.4f}g, 范围: [{min_acc:.4f}, {max_acc:.4f}]")
     logger.info(f"线性加速度Y - 均值: {avg_linear:.4f}g, 范围: [{min_linear:.4f}, {max_linear:.4f}]")
-    logger.info(f"linear_y与acc_y差异样本数: {diff_count}/{len(data)}")
-    logger.info(f"T_max={t_max} 时的波峰候选数: {len(peaks)}")
-    logger.info(f"T_min={t_min} 时的波谷候选数: {len(valleys)}")
-    logger.info(f"过零点数: {len(zero_crossings)}")
+    logger.info(f"参数: T_max={t_max}, T_min={t_min}")
+    logger.info("-" * 50)
+    logger.info(f"阶段1 - 波峰候选数 (C[0-4] > T_max 且 中间点最大): {len(peaks)}")
+    logger.info(f"阶段2 - 过零点数 (C[1] > 0 且 C[2] < 0): {len(zero_crossings)}")
+    logger.info(f"阶段3 - 波谷候选数 (C[0-4] < T_min 且 中间点最小): {len(valleys)}")
+    logger.info("-" * 50)
+    logger.info(f"完整三阶段检测到的步数: {valid_steps}")
 
 
 def find_latest_data_file():
@@ -253,17 +308,9 @@ def find_latest_data_file():
 
 
 def main():
-    import sys
-    import os
-    # 添加项目根目录到路径以导入config
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    try:
-        import config
-        DEFAULT_T_MAX = config.STEP_CONFIG.get("t_max", 0.12)
-        DEFAULT_T_MIN = config.STEP_CONFIG.get("t_min", -0.06)
-    except:
-        DEFAULT_T_MAX = 0.12
-        DEFAULT_T_MIN = -0.06
+    # 从配置文件读取默认参数
+    DEFAULT_T_MAX = config.STEP_CONFIG.get("t_max", 0.12)
+    DEFAULT_T_MIN = config.STEP_CONFIG.get("t_min", -0.06)
 
     parser = argparse.ArgumentParser(description='步数检测分析 - 绘图工具')
     parser.add_argument('input', nargs='?', help='输入CSV文件（默认自动查找最新）')
@@ -292,7 +339,10 @@ def main():
         args.output = os.path.join(os.path.dirname(input_file), "plots", base_name)
         logger.info(f"自动保存图表目录: {args.output}")
 
-    data = load_data(input_file)
+    raw_data = load_data(input_file)
+
+    # 使用重力去除器处理原始加速度数据
+    data = preprocess_data(raw_data)
 
     if args.text:
         plot_with_text(data, args.t_max, args.t_min)
